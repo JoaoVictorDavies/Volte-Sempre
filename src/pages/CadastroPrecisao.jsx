@@ -1,11 +1,19 @@
-import { useState } from 'react'
-import { supabase } from '../services/supabase' // Importando a conexão com o Supabase
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { supabase } from '../services/supabase'
 
 export default function CadastroPrecisao() {
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
+  const [sucesso, setSucesso] = useState(false)
+  
+  // Estados para dados reais do banco
+  const [setoresDoBanco, setSetoresDoBanco] = useState([])
+  const [marcasDoBanco, setMarcasDoBanco] = useState([])
+
   const [dados, setDados] = useState({
-    setor: '',
-    marca: '',
+    setorId: '',
+    marcaId: '',
     tipo: 'solo',
     nome: '',
     precoCusto: '',
@@ -14,13 +22,31 @@ export default function CadastroPrecisao() {
     codigoBarras: ''
   })
 
-  // Dados simulados para os "Dropdowns" (Listas de seleção)
-  const setores = ['Perfumaria', 'Alimentos', 'Novidades']
-  const marcas = {
-    'Perfumaria': ['Avon', 'Jequiti', 'O Boticário'],
-    'Alimentos': ['Cacau Show', 'Nestlé'],
-    'Novidades': ['Acessórios', 'Decoração']
-  }
+  // 1. Buscar SETORES ao carregar a página
+  useEffect(() => {
+    async function buscarSetores() {
+      const { data, error } = await supabase.from('setores').select('*').order('nome')
+      if (!error) setSetoresDoBanco(data)
+    }
+    buscarSetores()
+  }, [])
+
+  // 2. Buscar MARCAS quando um setor for selecionado
+  useEffect(() => {
+    if (dados.setorId) {
+      async function buscarMarcas() {
+        const { data, error } = await supabase
+          .from('marcas')
+          .select('*')
+          .eq('setor_id', dados.setorId)
+          .order('nome')
+        if (!error) setMarcasDoBanco(data)
+      }
+      buscarMarcas()
+    } else {
+      setMarcasDoBanco([]) // Limpa as marcas se nenhum setor estiver selecionado
+    }
+  }, [dados.setorId])
 
   // Atualiza um campo específico no estado
   const handleChange = (e) => {
@@ -28,10 +54,9 @@ export default function CadastroPrecisao() {
     setDados(prev => ({ ...prev, [name]: value }))
   }
 
-  // Função para salvar no Supabase
+  // 3. Função para salvar no Supabase
   const salvarProduto = async () => {
-    // Validação simples
-    if (!dados.nome || !dados.precoVenda || !dados.setor || !dados.marca) {
+    if (!dados.nome || !dados.precoVenda || !dados.setorId || !dados.marcaId) {
       alert("Por favor, preencha todos os campos obrigatórios (*).")
       return
     }
@@ -39,8 +64,7 @@ export default function CadastroPrecisao() {
     setLoading(true)
 
     try {
-      // Ajuste: Inserindo na tabela 'produtos'
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('produtos')
         .insert([
           {
@@ -50,39 +74,67 @@ export default function CadastroPrecisao() {
             preco_venda: parseFloat(dados.precoVenda) || 0,
             estoque: parseInt(dados.estoque) || 0,
             codigo_barras: dados.tipo === 'solo' ? dados.codigoBarras : null,
-            // NOTA: Como ainda não temos o fluxo de loja e marca vinculado no banco real,
-            // estamos salvando os textos temporariamente ou você precisará ajustar o banco
-            // para aceitar texto ou buscar o ID real da marca/setor.
+            marca_id: dados.marcaId
           }
         ])
 
-      if (error) {
-        console.error("Erro do Supabase:", error.message)
-        alert("Erro ao salvar: " + error.message)
-      } else {
-        alert("Produto cadastrado com sucesso!")
-        // Limpa o formulário após salvar
-        setDados({
-          setor: '',
-          marca: '',
-          tipo: 'solo',
-          nome: '',
-          precoCusto: '',
-          precoVenda: '',
-          estoque: '',
-          codigoBarras: ''
-        })
-      }
+      if (error) throw error
+      
+      // Se deu tudo certo, mostra a tela de sucesso
+      setSucesso(true)
+      
     } catch (err) {
       console.error("Erro inesperado:", err)
-      alert("Ocorreu um erro inesperado.")
+      alert("Ocorreu um erro ao salvar: " + err.message)
     } finally {
       setLoading(false)
     }
   }
 
+  const resetarFormulario = () => {
+    setDados({
+      setorId: '', marcaId: '', tipo: 'solo', nome: '', 
+      precoCusto: '', precoVenda: '', estoque: '', codigoBarras: ''
+    })
+    setSucesso(false)
+  }
+
+  // --- TELA DE SUCESSO ---
+  if (sucesso) {
+    return (
+      <div className="max-w-2xl mx-auto p-10 bg-white shadow-lg rounded-2xl mt-10 text-center animate-in zoom-in duration-300">
+        <div className="text-6xl mb-4">✅</div>
+        <h2 className="text-2xl font-bold text-gray-800 mb-6">Produto cadastrado com sucesso!</h2>
+        
+        <div className="flex flex-col gap-4">
+          <button 
+            onClick={resetarFormulario}
+            className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 shadow-md transition-all"
+          >
+            Cadastrar outro produto
+          </button>
+          
+          <button 
+            onClick={() => navigate('/visao-estoque')} // Rota futura
+            className="w-full bg-green-100 text-green-700 font-bold py-4 rounded-xl hover:bg-green-200 transition-all"
+          >
+            Ver produto no estoque
+          </button>
+          
+          <button 
+            onClick={() => navigate('/admin-home')}
+            className="w-full bg-gray-100 text-gray-700 font-bold py-4 rounded-xl hover:bg-gray-200 transition-all"
+          >
+            Finalizar
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // --- TELA DO FORMULÁRIO (CADASTRO) ---
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8 mt-6">
+    <div className="max-w-4xl mx-auto p-4 md:p-8 mt-6 animate-in fade-in duration-300">
       <div className="bg-white shadow-md rounded-2xl p-6 md:p-10 border border-gray-100">
         
         <div className="mb-8 border-b pb-4">
@@ -101,27 +153,27 @@ export default function CadastroPrecisao() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Setor *</label>
                 <select 
-                  name="setor" 
-                  value={dados.setor} 
+                  name="setorId" 
+                  value={dados.setorId} 
                   onChange={handleChange}
                   className="w-full border border-gray-300 p-3 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="">Selecione um setor...</option>
-                  {setores.map(s => <option key={s} value={s}>{s}</option>)}
+                  {setoresDoBanco.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}
                 </select>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Marca *</label>
                 <select 
-                  name="marca" 
-                  value={dados.marca} 
+                  name="marcaId" 
+                  value={dados.marcaId} 
                   onChange={handleChange}
-                  disabled={!dados.setor} // Trava se não escolher o setor antes
+                  disabled={!dados.setorId}
                   className="w-full border border-gray-300 p-3 rounded-lg bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <option value="">Selecione a marca...</option>
-                  {dados.setor && marcas[dados.setor]?.map(m => <option key={m} value={m}>{m}</option>)}
+                  {marcasDoBanco.map(m => <option key={m.id} value={m.id}>{m.nome}</option>)}
                 </select>
               </div>
 
@@ -159,7 +211,6 @@ export default function CadastroPrecisao() {
                 />
               </div>
 
-              {/* Só mostra código de barras se não for Kit */}
               {dados.tipo === 'solo' && (
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Código de Barras</label>
@@ -224,10 +275,7 @@ export default function CadastroPrecisao() {
           <div className="flex flex-col md:flex-row justify-end gap-3 pt-6 border-t border-gray-100">
             <button 
               type="button" 
-              onClick={() => {
-                // Opcional: botão para limpar o formulário
-                setDados({setor: '', marca: '', tipo: 'solo', nome: '', precoCusto: '', precoVenda: '', estoque: '', codigoBarras: ''})
-              }}
+              onClick={resetarFormulario}
               className="px-6 py-3 border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors"
             >
               Cancelar
