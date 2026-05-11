@@ -16,14 +16,14 @@ export default function Login() {
             onClick={() => setTelaAtual('funcionario')}
             className="bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 text-blue-700 font-bold py-6 rounded-xl shadow-sm transition-all"
           >
-            Entrar como Funcionário
+            Entrar como: VOLTE-Vendedor
           </button>
 
           <button 
             onClick={() => navigate('/admin-home')} // Direciona para a nova Home
             className="bg-white hover:bg-gray-50 border-2 border-gray-200 text-gray-700 font-bold py-6 rounded-xl shadow-sm transition-all"
           >
-            Já tenho sistema, entrar como administrador
+            Entrar como VOLTE-Administrador
           </button>
 
           <button 
