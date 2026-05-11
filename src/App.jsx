@@ -8,7 +8,7 @@ import Login from './pages/Login'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
 import CadastroPrecisao from './pages/CadastroPrecisao'
-import FuncionarioHome from './pages/FuncionarioHome' // <-- NOVO
+import FuncionarioHome from './pages/FuncionarioHome'
 
 export default function App() {
   
