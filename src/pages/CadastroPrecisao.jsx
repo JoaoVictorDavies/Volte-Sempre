@@ -7,7 +7,6 @@ export default function CadastroPrecisao() {
   const [loading, setLoading] = useState(false)
   const [sucesso, setSucesso] = useState(false)
   
-  // Estados para dados reais do banco
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
   const [marcasDoBanco, setMarcasDoBanco] = useState([])
 
@@ -22,7 +21,6 @@ export default function CadastroPrecisao() {
     codigoBarras: ''
   })
 
-  // 1. Buscar SETORES ao carregar a página
   useEffect(() => {
     async function buscarSetores() {
       const { data, error } = await supabase.from('setores').select('*').order('nome')
@@ -31,7 +29,6 @@ export default function CadastroPrecisao() {
     buscarSetores()
   }, [])
 
-  // 2. Buscar MARCAS quando um setor for selecionado
   useEffect(() => {
     if (dados.setorId) {
       async function buscarMarcas() {
@@ -44,17 +41,15 @@ export default function CadastroPrecisao() {
       }
       buscarMarcas()
     } else {
-      setMarcasDoBanco([]) // Limpa as marcas se nenhum setor estiver selecionado
+      setMarcasDoBanco([])
     }
   }, [dados.setorId])
 
-  // Atualiza um campo específico no estado
   const handleChange = (e) => {
     const { name, value } = e.target
     setDados(prev => ({ ...prev, [name]: value }))
   }
 
-  // 3. Função para salvar no Supabase
   const salvarProduto = async () => {
     if (!dados.nome || !dados.precoVenda || !dados.setorId || !dados.marcaId) {
       alert("Por favor, preencha todos os campos obrigatórios (*).")
@@ -80,7 +75,6 @@ export default function CadastroPrecisao() {
 
       if (error) throw error
       
-      // Se deu tudo certo, mostra a tela de sucesso
       setSucesso(true)
       
     } catch (err) {
@@ -99,7 +93,6 @@ export default function CadastroPrecisao() {
     setSucesso(false)
   }
 
-  // --- TELA DE SUCESSO ---
   if (sucesso) {
     return (
       <div className="max-w-2xl mx-auto p-10 bg-white shadow-lg rounded-2xl mt-10 text-center animate-in zoom-in duration-300">
@@ -115,7 +108,7 @@ export default function CadastroPrecisao() {
           </button>
           
           <button 
-            onClick={() => navigate('/visao-estoque')} // Rota futura
+            onClick={() => navigate('/visao-estoque')}
             className="w-full bg-green-100 text-green-700 font-bold py-4 rounded-xl hover:bg-green-200 transition-all"
           >
             Ver produto no estoque
@@ -132,7 +125,6 @@ export default function CadastroPrecisao() {
     )
   }
 
-  // --- TELA DO FORMULÁRIO (CADASTRO) ---
   return (
     <div className="max-w-4xl mx-auto p-4 md:p-8 mt-6 animate-in fade-in duration-300">
       <div className="bg-white shadow-md rounded-2xl p-6 md:p-10 border border-gray-100">
@@ -144,7 +136,6 @@ export default function CadastroPrecisao() {
 
         <form className="space-y-8">
           
-          {/* SESSÃO 1: CLASSIFICAÇÃO */}
           <div>
             <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
               📂 1. Classificação
@@ -187,13 +178,11 @@ export default function CadastroPrecisao() {
                 >
                   <option value="solo">Produto Solo</option>
                   <option value="kit_fixo">Kit Fixo (Fechado)</option>
-                  <option value="kit_dinamico">Kit Dinâmico (Avulsos)</option>
                 </select>
               </div>
             </div>
           </div>
 
-          {/* SESSÃO 2: DETALHES DO PRODUTO */}
           <div>
             <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
               🏷️ 2. Detalhes do Produto
@@ -227,7 +216,6 @@ export default function CadastroPrecisao() {
             </div>
           </div>
 
-          {/* SESSÃO 3: FINANCEIRO E ESTOQUE */}
           <div>
             <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
               💰 3. Financeiro e Estoque
@@ -271,7 +259,6 @@ export default function CadastroPrecisao() {
             </div>
           </div>
 
-          {/* BOTÕES DE AÇÃO */}
           <div className="flex flex-col md:flex-row justify-end gap-3 pt-6 border-t border-gray-100">
             <button 
               type="button" 
