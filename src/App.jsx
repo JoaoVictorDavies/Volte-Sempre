@@ -8,6 +8,7 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
+import CadastroPrecisao from './pages/CadastroPrecisao'
 
 export default function App() {
   
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/admin-home" element={<AdminHome />} />
           <Route path="/cadastro-produto" element={<CadastroProduto />} />
+          <Route path="/cadastro-precisao" element={<CadastroPrecisao />} />
         </Route>
       </Routes>
     </BrowserRouter>

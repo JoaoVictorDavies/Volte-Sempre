@@ -12,7 +12,7 @@ export default function AdminHome() {
         {/* Card Cadastro */}
         <Link to="/cadastro-produto" className="p-8 bg-white border-2 border-gray-100 rounded-2xl shadow-sm hover:border-blue-500 transition-all group">
           <h3 className="text-xl font-bold text-gray-700 group-hover:text-blue-600">📦 Cadastrar Produtos</h3>
-          <p className="text-gray-500 mt-2">Adicione novos itens, setores ou marcas ao seu estoque.</p>
+          <p className="text-gray-500 mt-2">Adicione novos itens ao estoque de forma facilitada</p>
         </Link>
 
         {/* Card Funcionários (Exemplo de funcionalidade futura) */}
