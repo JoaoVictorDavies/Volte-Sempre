@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import runOneSignal from './services/onesignal'
-
+import Pdv from './pages/Pdv'
 import Layout from './components/Layout'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -30,7 +30,7 @@ export default function App() {
           
           {/* Rotas do Funcionário */}
           <Route path="/funcionario-home" element={<FuncionarioHome />} />
-          
+          <Route path="/pdv" element={<Pdv />} />
           {/* Rotas Futuras (Vamos criar essas páginas em seguida) */}
           {/* <Route path="/pdv" element={<Pdv />} /> */}
           {/* <Route path="/estoque" element={<Estoque />} /> */}
