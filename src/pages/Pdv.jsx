@@ -86,12 +86,9 @@ export default function Pdv() {
   // 4. LÓGICA DA CALCULADORA
   const calcular = (expressao) => {
     try {
-      // Limpa letras ou códigos maliciosos, permitindo só matemática
       const expressaoLimpa = expressao.replace(/[^-()\d/*+.]/g, '')
       if (!expressaoLimpa) return
-      
       const resultado = new Function('return ' + expressaoLimpa)()
-      // Arredonda para 2 casas decimais se for quebrado, para ficar com cara de dinheiro
       setCalcDisplay(Number.isInteger(resultado) ? String(resultado) : resultado.toFixed(2))
     } catch (e) {
       setCalcDisplay('Erro')
@@ -157,54 +154,22 @@ export default function Pdv() {
           ========================================= */}
       <div className="flex-1 flex flex-col h-[60vh] md:h-full relative">
         
-        {/* CABEÇALHO ATUALIZADO */}
+        {/* CABEÇALHO */}
         <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10">
           <div className="flex items-center gap-4">
             <button onClick={() => navigate('/funcionario-home')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Sair</button>
             <h1 className="text-xl font-bold text-blue-700">Caixa Aberto</h1>
           </div>
           
-          {/* CALCULADORA (Botão e Popover) */}
-          <div className="relative">
-            <button 
-              onClick={() => setCalcAberto(!calcAberto)} 
-              className="text-blue-600 font-bold px-4 py-2 bg-blue-50 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
-            >
-              🧮 Calculadora
-            </button>
-            
-            {calcAberto && (
-              <div className="absolute right-0 top-12 w-64 bg-white shadow-2xl rounded-2xl border border-gray-200 p-4 z-50">
-                 <div className="bg-gray-100 p-3 rounded-lg text-right text-2xl font-mono mb-3 overflow-x-auto text-gray-800 min-h-[56px] flex items-center justify-end">
-                    {calcDisplay || '0'}
-                 </div>
-                 
-                 <div className="grid grid-cols-2 gap-2 mb-3">
-                   <button onClick={() => calcular(calcDisplay + '/2')} className="bg-purple-100 text-purple-700 text-sm font-bold py-2 rounded-lg hover:bg-purple-200 transition-colors">Dividir por 2</button>
-                   <button onClick={() => calcular(calcDisplay + '/3')} className="bg-purple-100 text-purple-700 text-sm font-bold py-2 rounded-lg hover:bg-purple-200 transition-colors">Dividir por 3</button>
-                 </div>
-                 
-                 <div className="grid grid-cols-4 gap-2">
-                    {['7','8','9','/','4','5','6','*','1','2','3','-','C','0','.','+'].map(btn => (
-                      <button 
-                        key={btn} 
-                        onClick={() => {
-                          if(btn === 'C') setCalcDisplay('')
-                          else setCalcDisplay(prev => prev === 'Erro' ? btn : prev + btn)
-                        }} 
-                        className={`p-2 rounded-lg font-bold text-lg border transition-colors ${btn === 'C' ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100' : 'bg-gray-50 hover:bg-gray-200 text-gray-700 border-gray-100'}`}
-                      >
-                        {btn}
-                      </button>
-                    ))}
-                    <button onClick={() => calcular(calcDisplay)} className="col-span-4 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700 mt-1 shadow-sm">=</button>
-                 </div>
-              </div>
-            )}
-          </div>
+          <button 
+            onClick={() => setCalcAberto(true)} 
+            className="text-white font-bold px-5 py-2 bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 transition-colors"
+          >
+            🧮 Calculadora
+          </button>
         </header>
 
-        {/* RESTANTE DO CAIXA INTACTO */}
+        {/* BARRA DE BUSCA */}
         <div className="p-4 bg-gray-50 border-b border-gray-200 z-20 relative">
           <div className="relative">
             <input 
@@ -230,6 +195,7 @@ export default function Pdv() {
           )}
         </div>
 
+        {/* LISTA DO CARRINHO */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 z-10" onClick={() => setBusca('')}>
           {carrinho.map(item => (
             <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -261,7 +227,7 @@ export default function Pdv() {
       </div>
 
       {/* =========================================
-          LADO DIREITO E MODAL (INTACTOS)
+          LADO DIREITO: TOTAL E COBRAR
           ========================================= */}
       <div className="w-full md:w-96 bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-[40vh] md:h-full z-20">
         <div className="p-6 flex-1 flex flex-col justify-center">
@@ -283,6 +249,9 @@ export default function Pdv() {
         </div>
       </div>
 
+      {/* =========================================
+          MODAL DE COBRANÇA
+          ========================================= */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black bg-opacity-70 z-[100] flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -336,6 +305,48 @@ export default function Pdv() {
           </div>
         </div>
       )}
+
+      {/* =========================================
+          MODAL DA CALCULADORA (BEM FORMATADO)
+          ========================================= */}
+      {calcAberto && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
+            <header className="bg-gray-800 p-4 text-white flex justify-between items-center">
+              <h2 className="text-xl font-bold">🧮 Calculadora</h2>
+              <button onClick={() => setCalcAberto(false)} className="text-gray-400 hover:text-white text-3xl font-bold">&times;</button>
+            </header>
+
+            <div className="p-6">
+               <div className="bg-gray-100 p-4 rounded-xl text-right text-3xl font-mono mb-6 overflow-x-auto text-gray-800 min-h-[72px] flex items-center justify-end border-2 border-gray-200 shadow-inner">
+                  {calcDisplay || '0'}
+               </div>
+               
+               <div className="grid grid-cols-2 gap-3 mb-4">
+                 <button onClick={() => calcular(calcDisplay + '/2')} className="bg-purple-100 text-purple-700 font-bold py-3 rounded-xl hover:bg-purple-200 transition-colors shadow-sm">Dividir por 2</button>
+                 <button onClick={() => calcular(calcDisplay + '/3')} className="bg-purple-100 text-purple-700 font-bold py-3 rounded-xl hover:bg-purple-200 transition-colors shadow-sm">Dividir por 3</button>
+               </div>
+               
+               <div className="grid grid-cols-4 gap-3">
+                  {['7','8','9','/','4','5','6','*','1','2','3','-','C','0','.','+'].map(btn => (
+                    <button 
+                      key={btn} 
+                      onClick={() => {
+                        if(btn === 'C') setCalcDisplay('')
+                        else setCalcDisplay(prev => prev === 'Erro' ? btn : prev + btn)
+                      }} 
+                      className={`p-4 rounded-xl font-bold text-xl transition-colors shadow-sm ${btn === 'C' ? 'bg-red-100 text-red-600 border border-red-200 hover:bg-red-200' : 'bg-gray-50 hover:bg-gray-200 text-gray-800 border border-gray-200'}`}
+                    >
+                      {btn}
+                    </button>
+                  ))}
+                  <button onClick={() => calcular(calcDisplay)} className="col-span-4 bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 mt-2 shadow-md text-xl">=</button>
+               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
