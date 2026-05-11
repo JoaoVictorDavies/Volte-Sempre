@@ -24,12 +24,21 @@ export default function App() {
     runOneSignal();
   }, []);
 
-  // Função da catraca global
+  // Função da catraca global (BLINDADA CONTRA ERROS DO VERCEL E ESPAÇOS)
   const liberarAcesso = (e) => {
     e.preventDefault()
-    const senhaCorreta = import.meta.env.VITE_SENHA_GLOBAL
+    
+    // Força a variável do .env a ser uma string, tira qualquer aspa perdida e remove espaços
+    const senhaCorreta = String(import.meta.env.VITE_SENHA_GLOBAL || '').replace(/["']/g, '').trim()
+    const senhaDigitada = senhaInput.trim() // Tira espaços caso você tenha digitado sem querer
 
-    if (senhaInput === senhaCorreta) {
+    // Se a senha do .env não foi encontrada pelo Vite, avisa no erro
+    if (!senhaCorreta || senhaCorreta === 'undefined') {
+      setErro('Erro do servidor: Senha global não configurada no Vercel.')
+      return
+    }
+
+    if (senhaDigitada === senhaCorreta) {
       localStorage.setItem('acesso_global_volte', 'liberado') // Salva na memória
       setAcessoGlobal(true)
     } else {
