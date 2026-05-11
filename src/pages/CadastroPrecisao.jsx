@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { supabase } from '../services/supabase' // Importando a conexão com o Supabase
 
 export default function CadastroPrecisao() {
+  const [loading, setLoading] = useState(false)
   const [dados, setDados] = useState({
     setor: '',
     marca: '',
@@ -24,6 +26,59 @@ export default function CadastroPrecisao() {
   const handleChange = (e) => {
     const { name, value } = e.target
     setDados(prev => ({ ...prev, [name]: value }))
+  }
+
+  // Função para salvar no Supabase
+  const salvarProduto = async () => {
+    // Validação simples
+    if (!dados.nome || !dados.precoVenda || !dados.setor || !dados.marca) {
+      alert("Por favor, preencha todos os campos obrigatórios (*).")
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      // Ajuste: Inserindo na tabela 'produtos'
+      const { data, error } = await supabase
+        .from('produtos')
+        .insert([
+          {
+            nome: dados.nome,
+            tipo: dados.tipo,
+            preco_custo: parseFloat(dados.precoCusto) || 0,
+            preco_venda: parseFloat(dados.precoVenda) || 0,
+            estoque: parseInt(dados.estoque) || 0,
+            codigo_barras: dados.tipo === 'solo' ? dados.codigoBarras : null,
+            // NOTA: Como ainda não temos o fluxo de loja e marca vinculado no banco real,
+            // estamos salvando os textos temporariamente ou você precisará ajustar o banco
+            // para aceitar texto ou buscar o ID real da marca/setor.
+          }
+        ])
+
+      if (error) {
+        console.error("Erro do Supabase:", error.message)
+        alert("Erro ao salvar: " + error.message)
+      } else {
+        alert("Produto cadastrado com sucesso!")
+        // Limpa o formulário após salvar
+        setDados({
+          setor: '',
+          marca: '',
+          tipo: 'solo',
+          nome: '',
+          precoCusto: '',
+          precoVenda: '',
+          estoque: '',
+          codigoBarras: ''
+        })
+      }
+    } catch (err) {
+      console.error("Erro inesperado:", err)
+      alert("Ocorreu um erro inesperado.")
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -167,11 +222,23 @@ export default function CadastroPrecisao() {
 
           {/* BOTÕES DE AÇÃO */}
           <div className="flex flex-col md:flex-row justify-end gap-3 pt-6 border-t border-gray-100">
-            <button type="button" className="px-6 py-3 border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors">
+            <button 
+              type="button" 
+              onClick={() => {
+                // Opcional: botão para limpar o formulário
+                setDados({setor: '', marca: '', tipo: 'solo', nome: '', precoCusto: '', precoVenda: '', estoque: '', codigoBarras: ''})
+              }}
+              className="px-6 py-3 border border-gray-300 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors"
+            >
               Cancelar
             </button>
-            <button type="button" className="px-8 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 shadow-md transition-colors">
-              Salvar Produto
+            <button 
+              type="button" 
+              onClick={salvarProduto}
+              disabled={loading}
+              className={`px-8 py-3 text-white font-bold rounded-xl shadow-md transition-colors ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+            >
+              {loading ? 'Salvando...' : 'Salvar Produto'}
             </button>
           </div>
 
