@@ -51,7 +51,7 @@ export default function Login() {
             onClick={() => navigate('/funcionario-home')}
             className="bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 text-blue-700 font-bold py-6 rounded-xl shadow-sm transition-all"
           >
-            Entrar como: Volte-VENDEDOR
+            Entrar como VENDEDOR
           </button>
 
           {/* Vai para a catraca do PIN do Administrador */}
@@ -59,7 +59,7 @@ export default function Login() {
             onClick={() => setEtapa('admin')} 
             className="bg-white hover:bg-gray-50 border-2 border-gray-200 text-gray-700 font-bold py-6 rounded-xl shadow-sm transition-all"
           >
-            Entrar como: Volte-ADMINISTRADOR
+            Entrar como ADMINISTRADOR
           </button>
         </div>
       </div>
