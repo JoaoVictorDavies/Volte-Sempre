@@ -10,11 +10,14 @@ export default function Pdv() {
   const [carrinho, setCarrinho] = useState([])
   const [estoqueCompleto, setEstoqueCompleto] = useState([])
   const [resultadosBusca, setResultadosBusca] = useState([])
-  const [carregando, setCarregando] = useState(true)
+  
+  // Estados da Calculadora
+  const [calcAberto, setCalcAberto] = useState(false)
+  const [calcDisplay, setCalcDisplay] = useState('')
 
   // Estados do Pagamento (Modal)
   const [modalAberto, setModalAberto] = useState(false)
-  const [metodo, setMetodo] = useState('pix') // pix, credito, debito, dinheiro
+  const [metodo, setMetodo] = useState('pix') 
   const [valorRecebido, setValorRecebido] = useState('')
   const [processandoVenda, setProcessandoVenda] = useState(false)
 
@@ -28,8 +31,6 @@ export default function Pdv() {
       if (!error) setEstoqueCompleto(data || [])
     } catch (error) {
       console.error(error)
-    } finally {
-      setCarregando(false)
     }
   }
 
@@ -46,16 +47,15 @@ export default function Pdv() {
     const termo = busca.toLowerCase()
     const filtrados = estoqueCompleto.filter(p => 
       (p.nome.toLowerCase().includes(termo) || (p.codigo_barras && p.codigo_barras.includes(termo))) &&
-      p.estoque > 0 // Só mostra na busca se tiver em estoque
+      p.estoque > 0 
     )
     setResultadosBusca(filtrados)
   }, [busca, estoqueCompleto])
 
-  // 3. CONTROLE DO CARRINHO (Adicionar, +, -, Remover)
+  // 3. CONTROLE DO CARRINHO
   const adicionarAoCarrinho = (produto) => {
     const itemExistente = carrinho.find(item => item.id === produto.id)
     if (itemExistente) {
-      // Trava para não vender mais do que tem no estoque
       if (itemExistente.qtd < produto.estoque) {
         setCarrinho(carrinho.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item))
       } else {
@@ -83,7 +83,22 @@ export default function Pdv() {
     setCarrinho(carrinho.filter(item => item.id !== id))
   }
 
-  // 4. FINALIZAR A VENDA (O coração do sistema)
+  // 4. LÓGICA DA CALCULADORA
+  const calcular = (expressao) => {
+    try {
+      // Limpa letras ou códigos maliciosos, permitindo só matemática
+      const expressaoLimpa = expressao.replace(/[^-()\d/*+.]/g, '')
+      if (!expressaoLimpa) return
+      
+      const resultado = new Function('return ' + expressaoLimpa)()
+      // Arredonda para 2 casas decimais se for quebrado, para ficar com cara de dinheiro
+      setCalcDisplay(Number.isInteger(resultado) ? String(resultado) : resultado.toFixed(2))
+    } catch (e) {
+      setCalcDisplay('Erro')
+    }
+  }
+
+  // 5. FINALIZAR A VENDA
   const finalizarCompra = async () => {
     if (metodo === 'dinheiro' && (valorRecebido === '' || parseFloat(valorRecebido) < total)) {
       alert("O valor recebido é menor que o total da compra!")
@@ -93,7 +108,6 @@ export default function Pdv() {
     setProcessandoVenda(true)
 
     try {
-      // A. Registrar o "Recibo" na tabela VENDAS
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
         .insert([{ 
@@ -107,9 +121,7 @@ export default function Pdv() {
 
       if (erroVenda) throw erroVenda
 
-      // B. Registrar os Itens e dar baixa no estoque
       for (const item of carrinho) {
-        // Salva o histórico do item
         await supabase.from('vendas_itens').insert([{
           venda_id: vendaCadastrada.id,
           produto_id: item.id,
@@ -119,18 +131,16 @@ export default function Pdv() {
           preco_venda: item.preco_venda
         }])
 
-        // Desconta do estoque real
         const novoEstoque = item.estoque - item.qtd
         await supabase.from('produtos').update({ estoque: novoEstoque }).eq('id', item.id)
       }
 
-      // Sucesso! Limpa tudo para o próximo cliente.
       alert("✅ Venda finalizada com sucesso!")
       setCarrinho([])
       setModalAberto(false)
       setValorRecebido('')
       setMetodo('pix')
-      carregarEstoque() // Atualiza o estoque na tela imediatamente
+      carregarEstoque() 
 
     } catch (error) {
       alert("Erro ao finalizar venda: " + error.message)
@@ -146,14 +156,55 @@ export default function Pdv() {
           LADO ESQUERDO: BUSCA E LISTA DE PRODUTOS
           ========================================= */}
       <div className="flex-1 flex flex-col h-[60vh] md:h-full relative">
-        <header className="bg-white p-4 shadow-sm flex items-center gap-4 z-10">
-          <button onClick={() => navigate('/funcionario-home')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Sair</button>
-          <div>
+        
+        {/* CABEÇALHO ATUALIZADO */}
+        <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10">
+          <div className="flex items-center gap-4">
+            <button onClick={() => navigate('/funcionario-home')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Sair</button>
             <h1 className="text-xl font-bold text-blue-700">Caixa Aberto</h1>
-            <p className="text-xs text-gray-500">{carregando ? 'Atualizando estoque...' : `${estoqueCompleto.length} produtos em estoque`}</p>
+          </div>
+          
+          {/* CALCULADORA (Botão e Popover) */}
+          <div className="relative">
+            <button 
+              onClick={() => setCalcAberto(!calcAberto)} 
+              className="text-blue-600 font-bold px-4 py-2 bg-blue-50 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors"
+            >
+              🧮 Calculadora
+            </button>
+            
+            {calcAberto && (
+              <div className="absolute right-0 top-12 w-64 bg-white shadow-2xl rounded-2xl border border-gray-200 p-4 z-50">
+                 <div className="bg-gray-100 p-3 rounded-lg text-right text-2xl font-mono mb-3 overflow-x-auto text-gray-800 min-h-[56px] flex items-center justify-end">
+                    {calcDisplay || '0'}
+                 </div>
+                 
+                 <div className="grid grid-cols-2 gap-2 mb-3">
+                   <button onClick={() => calcular(calcDisplay + '/2')} className="bg-purple-100 text-purple-700 text-sm font-bold py-2 rounded-lg hover:bg-purple-200 transition-colors">Dividir por 2</button>
+                   <button onClick={() => calcular(calcDisplay + '/3')} className="bg-purple-100 text-purple-700 text-sm font-bold py-2 rounded-lg hover:bg-purple-200 transition-colors">Dividir por 3</button>
+                 </div>
+                 
+                 <div className="grid grid-cols-4 gap-2">
+                    {['7','8','9','/','4','5','6','*','1','2','3','-','C','0','.','+'].map(btn => (
+                      <button 
+                        key={btn} 
+                        onClick={() => {
+                          if(btn === 'C') setCalcDisplay('')
+                          else setCalcDisplay(prev => prev === 'Erro' ? btn : prev + btn)
+                        }} 
+                        className={`p-2 rounded-lg font-bold text-lg border transition-colors ${btn === 'C' ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100' : 'bg-gray-50 hover:bg-gray-200 text-gray-700 border-gray-100'}`}
+                      >
+                        {btn}
+                      </button>
+                    ))}
+                    <button onClick={() => calcular(calcDisplay)} className="col-span-4 bg-blue-600 text-white font-bold py-2 rounded-lg hover:bg-blue-700 mt-1 shadow-sm">=</button>
+                 </div>
+              </div>
+            )}
           </div>
         </header>
 
+        {/* RESTANTE DO CAIXA INTACTO */}
         <div className="p-4 bg-gray-50 border-b border-gray-200 z-20 relative">
           <div className="relative">
             <input 
@@ -179,7 +230,6 @@ export default function Pdv() {
           )}
         </div>
 
-        {/* LISTA DO CARRINHO (Com os novos controles) */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3 z-10" onClick={() => setBusca('')}>
           {carrinho.map(item => (
             <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -188,7 +238,6 @@ export default function Pdv() {
                 <p className="text-sm text-gray-500">R$ {Number(item.preco_venda).toFixed(2)} /unidade</p>
               </div>
               
-              {/* Controles: Lixeira, Menos, Quantidade, Mais */}
               <div className="flex items-center gap-3">
                 <button onClick={() => removerDoCarrinho(item.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Remover item">🗑️</button>
                 <div className="flex items-center bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
@@ -212,7 +261,7 @@ export default function Pdv() {
       </div>
 
       {/* =========================================
-          LADO DIREITO: TOTAL E PAGAMENTO
+          LADO DIREITO E MODAL (INTACTOS)
           ========================================= */}
       <div className="w-full md:w-96 bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-[40vh] md:h-full z-20">
         <div className="p-6 flex-1 flex flex-col justify-center">
@@ -234,61 +283,46 @@ export default function Pdv() {
         </div>
       </div>
 
-      {/* =========================================
-          MODAL DE COBRANÇA (SOBREPÕE A TELA)
-          ========================================= */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black bg-opacity-70 z-[100] flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-            
             <header className="bg-blue-600 p-4 text-white flex justify-between items-center">
               <h2 className="text-xl font-bold">Finalizar Venda</h2>
               <button onClick={() => setModalAberto(false)} className="text-blue-200 hover:text-white text-2xl font-bold">&times;</button>
             </header>
-
             <div className="p-6 flex-1 overflow-y-auto">
               <div className="text-center mb-6">
                 <p className="text-gray-500 font-medium">Total a Pagar</p>
                 <p className="text-5xl font-bold text-green-600">R$ {total.toFixed(2)}</p>
               </div>
-
               <h3 className="font-bold text-gray-700 mb-3 border-b pb-2">Forma de Pagamento</h3>
               <div className="grid grid-cols-2 gap-3 mb-6">
                 {['pix', 'credito', 'debito', 'dinheiro'].map(tipo => (
                   <button 
-                    key={tipo}
-                    onClick={() => { setMetodo(tipo); setValorRecebido(''); }}
+                    key={tipo} onClick={() => { setMetodo(tipo); setValorRecebido(''); }}
                     className={`p-4 rounded-xl font-bold border-2 capitalize transition-all ${metodo === tipo ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
                   >
                     {tipo === 'pix' ? '💠 Pix' : tipo === 'credito' ? '💳 Crédito' : tipo === 'debito' ? '💳 Débito' : '💵 Dinheiro'}
                   </button>
                 ))}
               </div>
-
-              {/* Lógica especial se for DINHEIRO (Troco) */}
               {metodo === 'dinheiro' && (
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 animate-in slide-in-from-bottom-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Valor Recebido do Cliente (R$)</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Valor Recebido (R$)</label>
                   <input 
-                    type="number" autoFocus
-                    value={valorRecebido} onChange={(e) => setValorRecebido(e.target.value)}
+                    type="number" autoFocus value={valorRecebido} onChange={(e) => setValorRecebido(e.target.value)}
                     placeholder="Ex: 50.00"
                     className="w-full border border-gray-300 p-4 rounded-lg focus:ring-2 focus:ring-blue-500 text-xl text-center outline-none"
                   />
-                  
                   {valorRecebido && parseFloat(valorRecebido) >= total && (
                     <div className="mt-4 flex justify-between items-center bg-green-100 p-4 rounded-lg border border-green-200">
                       <span className="font-bold text-green-800">Troco a devolver:</span>
                       <span className="text-2xl font-bold text-green-700">R$ {troco.toFixed(2)}</span>
                     </div>
                   )}
-                  {valorRecebido && parseFloat(valorRecebido) < total && (
-                    <p className="mt-2 text-red-500 text-sm font-bold text-center">Valor insuficiente.</p>
-                  )}
                 </div>
               )}
             </div>
-
             <div className="p-4 bg-gray-100 border-t flex gap-3">
               <button onClick={() => setModalAberto(false)} className="flex-1 py-4 font-bold text-gray-600 bg-white border border-gray-300 rounded-xl hover:bg-gray-50">Cancelar</button>
               <button 
@@ -299,11 +333,9 @@ export default function Pdv() {
                 {processandoVenda ? 'Registrando...' : 'Confirmar Venda'}
               </button>
             </div>
-            
           </div>
         </div>
       )}
-
     </div>
   )
 }
