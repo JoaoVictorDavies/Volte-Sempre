@@ -18,7 +18,8 @@
     "react-dom": "^19.2.5",
     "react-onesignal": "^3.5.1",
     "react-router-dom": "^7.15.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "thermal-printer-encoder": "^3.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

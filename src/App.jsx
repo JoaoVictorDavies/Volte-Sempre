@@ -11,6 +11,7 @@ import CadastroPrecisao from './pages/CadastroPrecisao'
 import FuncionarioHome from './pages/FuncionarioHome'
 import Pdv from './pages/Pdv'
 import Financeiro from './pages/Financeiro'
+import TesteImpressora from './pages/TesteImpressora'
 export default function App() {
   // Verifica na memória do celular/PC se a pessoa já colocou a senha global antes
   const [acessoGlobal, setAcessoGlobal] = useState(
@@ -87,7 +88,8 @@ export default function App() {
 <Route path="/cadastro-produto" element={<CadastroProduto />} />
 <Route path="/cadastro-precisao" element={<CadastroPrecisao />} />
 <Route path="/estoque" element={<Estoque />} />
-<Route path="/financeiro" element={<Financeiro />} />         
+<Route path="/financeiro" element={<Financeiro />} />
+<Route path="/teste-impressora" element={<TesteImpressora />} />
           {/* Rotas do Funcionário */}
           <Route path="/funcionario-home" element={<FuncionarioHome />} />
         </Route>
