@@ -186,7 +186,7 @@ export default function CadastroPrecisao() {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-              onClick={() => navigate('/visao-estoque')}
+              onClick={() => navigate('/Estoque')}
               className="w-full h-[52px] flex items-center justify-center gap-2 rounded-2xl font-semibold text-sm bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
             >
               <PackageCheck size={16} strokeWidth={1.8} />

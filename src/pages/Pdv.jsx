@@ -95,7 +95,7 @@ export default function Pdv() {
     }
   }
 
-  // 5. FINALIZAR A VENDA
+// 5. FINALIZAR A VENDA
   const finalizarCompra = async () => {
     if (metodo === 'dinheiro' && (valorRecebido === '' || parseFloat(valorRecebido) < total)) {
       alert("O valor recebido é menor que o total da compra!")
@@ -105,19 +105,24 @@ export default function Pdv() {
     setProcessandoVenda(true)
 
     try {
+      // -> NOVIDADE AQUI: Pega a sessão ativa da memória
+      const sessaoSalva = localStorage.getItem('volte_sessao_caixa')
+      const sessao = sessaoSalva ? JSON.parse(sessaoSalva) : null
+
+      // -> NOVIDADE AQUI: Inserimos o sessao_id junto com os dados da venda
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
         .insert([{ 
           total: total, 
           metodo_pagamento: metodo, 
           valor_recebido: metodo === 'dinheiro' ? parseFloat(valorRecebido) : total,
-          troco: troco > 0 ? troco : 0
+          troco: troco > 0 ? troco : 0,
+          sessao_id: sessao ? sessao.id : null // Carimba a venda no nome do operador
         }])
         .select()
         .single()
 
       if (erroVenda) throw erroVenda
-
       for (const item of carrinho) {
         await supabase.from('vendas_itens').insert([{
           venda_id: vendaCadastrada.id,

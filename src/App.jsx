@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import runOneSignal from './services/onesignal'
-
+import Estoque from './pages/Estoque'
 import Layout from './components/Layout'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -10,7 +10,7 @@ import CadastroProduto from './pages/CadastroProduto'
 import CadastroPrecisao from './pages/CadastroPrecisao'
 import FuncionarioHome from './pages/FuncionarioHome'
 import Pdv from './pages/Pdv'
-
+import Financeiro from './pages/Financeiro'
 export default function App() {
   // Verifica na memória do celular/PC se a pessoa já colocou a senha global antes
   const [acessoGlobal, setAcessoGlobal] = useState(
@@ -83,10 +83,11 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           
           {/* Rotas do Admin */}
-          <Route path="/admin-home" element={<AdminHome />} />
-          <Route path="/cadastro-produto" element={<CadastroProduto />} />
-          <Route path="/cadastro-precisao" element={<CadastroPrecisao />} />
-          
+<Route path="/admin-home" element={<AdminHome />} />
+<Route path="/cadastro-produto" element={<CadastroProduto />} />
+<Route path="/cadastro-precisao" element={<CadastroPrecisao />} />
+<Route path="/estoque" element={<Estoque />} />
+<Route path="/financeiro" element={<Financeiro />} />         
           {/* Rotas do Funcionário */}
           <Route path="/funcionario-home" element={<FuncionarioHome />} />
         </Route>

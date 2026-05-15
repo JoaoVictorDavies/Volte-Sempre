@@ -64,7 +64,7 @@ export default function Login() {
         {/* Eyebrow */}
         <motion.div {...fadeUp(0)} className="flex justify-center mb-8">
           <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold tracking-widest uppercase bg-white/70 backdrop-blur-md text-[#86868B] shadow-sm border border-white/60">
-            VOLTE · Perfumaria
+            VOLTE · Sistemas
           </span>
         </motion.div>
 
@@ -81,7 +81,7 @@ export default function Login() {
                 className="font-bold text-[#1D1D1F] text-center mb-2"
                 style={{ fontSize: 'clamp(1.8rem, 5vw, 2.4rem)', letterSpacing: '-0.025em' }}
               >
-                Identifique-se
+                Operação
               </h2>
               <p className="text-[#86868B] text-base mb-10 text-center">
                 Escolha como deseja acessar o sistema.
@@ -104,9 +104,9 @@ export default function Login() {
                   </div>
                   <div>
                     <p className="font-semibold text-[#1D1D1F] text-base" style={{ letterSpacing: '-0.01em' }}>
-                      Entrar como Vendedor
+                      Gaveta do Caixa
                     </p>
-                    <p className="text-[#86868B] text-sm mt-0.5">PDV, estoque e consultas</p>
+                    <p className="text-[#86868B] text-sm mt-0.5">Abrir o Caixa, Checar Estoque e Vender</p>
                   </div>
                 </motion.button>
 

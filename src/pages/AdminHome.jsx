@@ -39,6 +39,22 @@ const LockIcon = () => (
   </svg>
 )
 
+const DollarIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="1" x2="12" y2="23"></line>
+    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+  </svg>
+)
+
+const ChartIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 3v18h18"></path>
+    <path d="M18 17V9"></path>
+    <path d="M13 17V5"></path>
+    <path d="M8 17v-3"></path>
+  </svg>
+)
+
 export default function AdminHome() {
   return (
     <div className="min-h-screen bg-[#F5F5F7] px-4 py-12">
@@ -60,6 +76,68 @@ export default function AdminHome() {
           </p>
         </header>
 
+        {/* ── Seção: Financeiro e Controle ── */}
+        <section className="mb-10">
+          <div className="flex items-center gap-2 px-2 mb-5">
+            <span className="text-[#86868B]"><DollarIcon /></span>
+            <h2 className="text-xs font-semibold tracking-widest text-[#86868B] uppercase">
+              Controle Geral
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            {/* Card — Fechamento Financeiro */}
+            <Link
+              to="/financeiro"
+              className="group flex flex-col justify-between bg-white rounded-3xl p-8 transition-all duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+              style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
+            >
+              <div>
+                <div className="w-10 h-10 rounded-2xl bg-green-50 flex items-center justify-center text-green-500 mb-5">
+                  <DollarIcon />
+                </div>
+                <h3 className="text-lg font-semibold text-[#1D1D1F] leading-snug" style={{ letterSpacing: '-0.01em' }}>
+                  Fechamento do Caixa
+                  <span className="ml-2 text-xs font-medium text-green-500 bg-green-50 px-2 py-0.5 rounded-full align-middle">
+                    Diário
+                  </span>
+                </h3>
+                <p className="text-[#86868B] mt-2 text-sm leading-relaxed">
+                  Confira as vendas de hoje, totais por método de pagamento e verifique quem abriu os caixas.
+                </p>
+              </div>
+              <div className="mt-6 flex items-center text-green-500 text-sm font-medium gap-1 transition-all duration-300 group-hover:gap-2">
+                Acessar <ChevronRightIcon />
+              </div>
+            </Link>
+
+            {/* Card — Visão de Estoque */}
+            <Link
+              to="/estoque"
+              className="group flex flex-col justify-between bg-white rounded-3xl p-8 transition-all duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
+            >
+              <div>
+                <div className="w-10 h-10 rounded-2xl bg-orange-50 flex items-center justify-center text-orange-500 mb-5">
+                  <ChartIcon />
+                </div>
+                <h3 className="text-lg font-semibold text-[#1D1D1F] leading-snug" style={{ letterSpacing: '-0.01em' }}>
+                  Visão de Estoque
+                </h3>
+                <p className="text-[#86868B] mt-2 text-sm leading-relaxed">
+                  Visualize todos os seus produtos organizados por Setor e Marca, e acompanhe o que tem na prateleira.
+                </p>
+              </div>
+              <div className="mt-6 flex items-center text-orange-500 text-sm font-medium gap-1 transition-all duration-300 group-hover:gap-2">
+                Acessar <ChevronRightIcon />
+              </div>
+            </Link>
+
+          </div>
+        </section>
+
+
         {/* ── Seção: Estoque e Produtos ── */}
         <section className="mb-10">
           <div className="flex items-center gap-2 px-2 mb-5">
@@ -67,7 +145,7 @@ export default function AdminHome() {
             <h2
               className="text-xs font-semibold tracking-widest text-[#86868B] uppercase"
             >
-              Estoque e Produtos
+              Cadastro de Produtos
             </h2>
           </div>
 
