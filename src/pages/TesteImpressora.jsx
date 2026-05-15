@@ -9,26 +9,54 @@ const TesteImpressora = () => {
     try {
       setStatus('Buscando impressora...');
 
-      // 1. Solicitar dispositivo Bluetooth
-      // O UUID '00001101-0000-1000-8000-00805f9b34fb' é o padrão para Serial Port (SPP)
+      // 1. Solicitar dispositivo Bluetooth (Modo "Rede Aberta")
       const selectedDevice = await navigator.bluetooth.requestDevice({
-        filters: [
-          { namePrefix: 'MTP' }, // Filtra por nomes que começam com MTP
-          { name: 'MTP5' }       // Nome exato da sua Goldensky
-        ],
-        optionalServices: ['00001101-0000-1000-8000-00805f9b34fb']
+        acceptAllDevices: true, 
+        optionalServices: [
+            '00001101-0000-1000-8000-00805f9b34fb', // SPP Padrão
+            '000018f0-0000-1000-8000-00805f9b34fb', // Serviço comum em impressoras chinesas
+            '49535343-fe7d-4ae5-8fa9-9fafd205e455'  // Outro serviço comum (ISSC)
+        ]
       });
 
+      console.log("Dispositivo selecionado: ", selectedDevice.name);
+      
       setStatus('Conectando ao GATT...');
       const server = await selectedDevice.gatt.connect();
+
+      setStatus('Buscando porta de comunicação...');
+      let targetCharacteristic;
       
-      setStatus('Buscando Serviço Serial...');
-      const service = await server.getPrimaryService('00001101-0000-1000-8000-00805f9b34fb');
-      
-      setStatus('Buscando Característica de Escrita...');
-      // Pegamos a primeira característica disponível para enviar os dados
-      const characteristics = await service.getCharacteristics();
-      const characteristic = characteristics[0];
+      // Array com os serviços que vamos tentar acessar
+      const servicesToTry = [
+        '00001101-0000-1000-8000-00805f9b34fb',
+        '000018f0-0000-1000-8000-00805f9b34fb',
+        '49535343-fe7d-4ae5-8fa9-9fafd205e455'
+      ];
+
+      // Loop inteligente: testa qual serviço a sua MTP5 está usando
+      for (let uuid of servicesToTry) {
+        try {
+          const service = await server.getPrimaryService(uuid);
+          const characteristics = await service.getCharacteristics();
+          
+          // Procura dentro do serviço uma característica que permita enviar dados (write)
+          const char = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
+          
+          if (char) {
+            targetCharacteristic = char;
+            console.log(`Sucesso! Usando o serviço: ${uuid}`);
+            break; // Achou a porta certa, interrompe o loop
+          }
+        } catch (err) {
+          console.log(`Tentativa falhou no serviço ${uuid}, tentando o próximo...`);
+        }
+      }
+
+      // Se passou por todos os serviços e não achou a porta de escrita, aborta.
+      if (!targetCharacteristic) {
+        throw new Error("A impressora foi pareada, mas não liberou permissão de escrita.");
+      }
 
       setStatus('Formatando nota...');
       
@@ -56,8 +84,8 @@ const TesteImpressora = () => {
 
       setStatus('Enviando dados...');
       
-      // 3. Enviar os bytes para a impressora
-      await characteristic.writeValue(dadosParaEnviar);
+      // 3. Enviar os bytes formatados para a impressora
+      await targetCharacteristic.writeValue(dadosParaEnviar);
       
       setStatus('Impresso com sucesso!');
       setDevice(selectedDevice);
@@ -81,7 +109,7 @@ const TesteImpressora = () => {
         </button>
       </div>
       <p style={{ fontSize: '12px', color: '#666' }}>
-        Certifique-se que a impressora está ligada e o Bluetooth do Motorola ativo.
+        Lembrete: Despareie a impressora do menu do celular antes de tentar via Web App.
       </p>
     </div>
   );
