@@ -21,23 +21,42 @@ export default function Pdv() {
   const [valorRecebido, setValorRecebido] = useState('')
   const [processandoVenda, setProcessandoVenda] = useState(false)
 
+  // Estado da Sessão Logada
+  const [sessaoAtiva, setSessaoAtiva] = useState(null)
+
   const total = carrinho.reduce((acc, item) => acc + (item.qtd * item.preco_venda), 0)
   const troco = metodo === 'dinheiro' && valorRecebido ? parseFloat(valorRecebido) - total : 0
 
   // ==========================================
-  // 1. CARREGAR ESTOQUE (COM A NOVA FILA DE LOTES)
+  // 1. VERIFICAÇÃO DE SEGURANÇA DA SESSÃO
+  // ==========================================
+  useEffect(() => {
+    const sessaoSalva = localStorage.getItem('volte_sessao_caixa')
+    if (!sessaoSalva) {
+      alert("Acesso negado! Por favor, insira seu PIN para abrir ou retomar um caixa.")
+      navigate('/funcionario-home')
+      return
+    }
+    
+    const sessaoObjeto = JSON.parse(sessaoSalva)
+    setSessaoAtiva(sessaoObjeto)
+    carregarEstoque()
+  }, [navigate])
+
+  // ==========================================
+  // 2. CARREGAR ESTOQUE (VIA FILA DE LOTES)
   // ==========================================
   const carregarEstoque = async () => {
     try {
       const { data, error } = await supabase.from('produtos').select('*, estoque_lotes(*)')
       if (error) throw error
 
-      // Calcula o estoque real varrendo a tabela de lotes
+      // Calcula o estoque real varrendo a tabela de lotes válidos
       const estoqueProcessado = (data || []).map(p => {
         const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
         const estoqueTotal = lotesValidos.reduce((acc, l) => acc + l.quantidade_atual, 0)
         return { ...p, estoqueTotal }
-      }).filter(p => p.estoqueTotal > 0) // Só traz o que realmente tem na loja
+      }).filter(p => p.estoqueTotal > 0) // Esconde produtos completamente zerados
 
       setEstoqueCompleto(estoqueProcessado)
     } catch (error) {
@@ -45,12 +64,8 @@ export default function Pdv() {
     }
   }
 
-  useEffect(() => {
-    carregarEstoque()
-  }, [])
-
   // ==========================================
-  // 2. BUSCA EM TEMPO REAL
+  // 3. BUSCA EM TEMPO REAL
   // ==========================================
   useEffect(() => {
     if (busca.trim() === '') {
@@ -65,7 +80,7 @@ export default function Pdv() {
   }, [busca, estoqueCompleto])
 
   // ==========================================
-  // 3. CONTROLE DO CARRINHO
+  // 4. CONTROLE DO CARRINHO
   // ==========================================
   const adicionarAoCarrinho = (produto) => {
     const itemExistente = carrinho.find(item => item.id === produto.id)
@@ -73,7 +88,7 @@ export default function Pdv() {
       if (itemExistente.qtd < produto.estoqueTotal) {
         setCarrinho(carrinho.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item))
       } else {
-        alert('Quantidade máxima em estoque atingida!')
+        alert('Quantidade máxima em estoque atingida para este lote!')
       }
     } else {
       setCarrinho([...carrinho, { ...produto, qtd: 1 }])
@@ -98,7 +113,7 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // 4. LÓGICA DA CALCULADORA
+  // 5. LÓGICA DA CALCULADORA
   // ==========================================
   const calcular = (expressao) => {
     try {
@@ -112,7 +127,7 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // 5. FINALIZAR A VENDA E PROCESSAR A FILA DE LOTES (PEPS)
+  // 6. FINALIZAR A VENDA (MOTOR PEPS DE LOTES)
   // ==========================================
   const finalizarCompra = async () => {
     if (metodo === 'dinheiro' && (valorRecebido === '' || parseFloat(valorRecebido) < total)) {
@@ -123,11 +138,7 @@ export default function Pdv() {
     setProcessandoVenda(true)
 
     try {
-      // Pega a sessão ativa da memória
-      const sessaoSalva = localStorage.getItem('volte_sessao_caixa')
-      const sessao = sessaoSalva ? JSON.parse(sessaoSalva) : null
-
-      // A. Cria o recibo geral da venda
+      // Cria a venda amarrada à sessão do funcionário e à loja dele
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
         .insert([{ 
@@ -135,55 +146,56 @@ export default function Pdv() {
           metodo_pagamento: metodo, 
           valor_recebido: metodo === 'dinheiro' ? parseFloat(valorRecebido) : total,
           troco: troco > 0 ? troco : 0,
-          sessao_id: sessao ? sessao.id : null 
+          sessao_id: sessaoAtiva ? sessaoAtiva.id : null,
+          loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
         }])
         .select()
         .single()
 
       if (erroVenda) throw erroVenda
 
-      // B. Processa cada item do carrinho dando baixa nos Lotes Corretos (A Mágica)
+      // Varre o carrinho para abater os lotes corretos (Fila Invisível)
       for (const item of carrinho) {
         let qtdRestanteParaBaixar = item.qtd
 
-        // Busca os lotes desse produto que têm estoque (do mais velho pro mais novo)
+        // Busca todos os lotes que têm unidades disponíveis
         const { data: lotes } = await supabase
           .from('estoque_lotes')
           .select('*')
           .eq('produto_id', item.id)
           .gt('quantidade_atual', 0)
 
-        // Ordena no front: 'ativo' sempre em primeiro, depois pela data
-        const lotesOrdenados = lotes.sort((a, b) => {
+        // Ordena: 'ativo' vem sempre primeiro (se houver), seguido da data de entrada (PEPS)
+        const lotesOrdenados = (lotes || []).sort((a, b) => {
           if (a.status === 'ativo' && b.status !== 'ativo') return -1;
           if (a.status !== 'ativo' && b.status === 'ativo') return 1;
           return new Date(a.criado_em) - new Date(b.criado_em);
         });
 
-        // Deduz da fila
+        // Consome da fila lote por lote
         for (const lote of lotesOrdenados) {
-          if (qtdRestanteParaBaixar <= 0) break; // Já baixou tudo que precisava
+          if (qtdRestanteParaBaixar <= 0) break;
 
-          // Vê quanto dá pra tirar desse lote
           const qtdDeducao = Math.min(qtdRestanteParaBaixar, lote.quantidade_atual)
           const novaQtdLote = lote.quantidade_atual - qtdDeducao
           
-          // Se o lote zerar, esgotou. Se ainda sobrar e ele estava em espera, ele "acorda" e vira ativo.
+          // Se o lote zerou completamente, muda o status. Se sobrou estoque, vira ativo.
           const novoStatus = novaQtdLote === 0 ? 'esgotado' : 'ativo'
 
-          // Atualiza o Lote no Banco
+          // Atualiza o lote consumido
           await supabase.from('estoque_lotes')
             .update({ quantidade_atual: novaQtdLote, status: novoStatus })
             .eq('id', lote.id)
 
-          // Registra o item na venda com o CUSTO EXATO deste lote
+          // Grava o item vendido com o custo exato obtido desse lote específico
           await supabase.from('vendas_itens').insert([{
             venda_id: vendaCadastrada.id,
             produto_id: item.id,
             nome: item.nome,
             quantidade: qtdDeducao,
             preco_custo: lote.preco_custo, 
-            preco_venda: item.preco_venda
+            preco_venda: item.preco_venda,
+            loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
           }])
 
           qtdRestanteParaBaixar -= qtdDeducao
@@ -195,7 +207,7 @@ export default function Pdv() {
       setModalAberto(false)
       setValorRecebido('')
       setMetodo('pix')
-      carregarEstoque() // Atualiza os estoques na tela
+      carregarEstoque() // Recarrega os dados atualizados para a tela
 
     } catch (error) {
       alert("Erro ao finalizar venda: " + error.message)
@@ -215,8 +227,8 @@ export default function Pdv() {
         {/* CABEÇALHO */}
         <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10">
           <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/funcionario-home')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Sair</button>
-            <h1 className="text-xl font-bold text-blue-700">Caixa Aberto</h1>
+            <button onClick={() => navigate('/funcionario-home')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Painel</button>
+            <h1 className="text-xl font-bold text-blue-700">Caixa: {sessaoAtiva?.operador || 'Carregando...'}</h1>
           </div>
           
           <button 
