@@ -136,7 +136,6 @@ export default function CadastroProduto() {
   const [cameraAtiva, setCameraAtiva] = useState(false)
   const [codigoLidoCamera, setCodigoLidoCamera] = useState(null)
   
-  // A TRAVA DO GATILHO DA CÂMERA
   const travaCameraRef = useRef(false)
 
   // Dados do Banco
@@ -151,6 +150,12 @@ export default function CadastroProduto() {
     tipo: 'solo', nome: '', precoCusto: '', precoVenda: '',
     estoque: '', codigoBarras: ''
   })
+
+  // === VALIDAÇÃO DE CAMPOS VAZIOS ===
+  // Se for Lote: precisa só das métricas do lote. Se for Novo: precisa de Nome também.
+  const formValido = isLoteMode 
+    ? (dados.estoque !== '' && dados.precoCusto !== '' && dados.precoVenda !== '')
+    : (dados.nome.trim() !== '' && dados.estoque !== '' && dados.precoCusto !== '' && dados.precoVenda !== '');
 
   useEffect(() => {
     async function buscarSetores() {
@@ -173,7 +178,6 @@ export default function CadastroProduto() {
   const avancar = () => { slideDirection = 1; setEtapa(e => e + 1) }
   const voltar = () => { slideDirection = -1; setEtapa(e => e - 1) }
 
-  // 1. O OLHO DO LEITOR (INPUT FÍSICO / TECLADO)
   const handleBarcodeChange = (e) => {
     const codigo = e.target.value
     setDados(prev => ({ ...prev, codigoBarras: codigo }))
@@ -198,7 +202,6 @@ export default function CadastroProduto() {
     }
   }
 
-  // Permite dar 'Enter' no leitor para agilizar
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && produtoExistente) {
       iniciarModoLote()
@@ -207,14 +210,12 @@ export default function CadastroProduto() {
     }
   }
 
-  // Ação ao ler o código na câmera
   const handleCameraSucesso = (codigo) => {
     if (travaCameraRef.current) return;
-    travaCameraRef.current = true; // Baixa a trava
+    travaCameraRef.current = true;
     setCodigoLidoCamera(codigo);
   }
 
-  // Ação ao confirmar o código lido na câmera
   const confirmarCodigoLido = async () => {
     setCameraAtiva(false)
     setDados(prev => ({ ...prev, codigoBarras: codigoLidoCamera }))
@@ -223,10 +224,8 @@ export default function CadastroProduto() {
     const codigoFinal = codigoLidoCamera
     setCodigoLidoCamera(null)
     
-    // Libera a trava para a próxima vez que abrir a câmera
     setTimeout(() => { travaCameraRef.current = false }, 400)
 
-    // Faz a consulta do produto logo após confirmar o código
     const { data } = await supabase.from('produtos').select('*').eq('codigo_barras', codigoFinal).single()
     if (data) {
       setProdutoExistente(data)
@@ -237,33 +236,29 @@ export default function CadastroProduto() {
     setBuscando(false)
   }
 
-  // 2. RAMIFICAÇÕES DO FLUXO
   const iniciarModoLote = () => {
     setIsLoteMode(true)
-    setTotalEtapas(2) // Passos: 1(Barcode) -> 2(Add Lote)
+    setTotalEtapas(2) 
     avancar()
   }
 
   const iniciarModoManual = () => {
     setIsLoteMode(false)
-    setTotalEtapas(5) // Passos: 1(Barcode) -> 2(Setor) -> 3(Marca) -> 4(Tipo) -> 5(Info)
+    setTotalEtapas(5) 
     avancar()
   }
 
-  // 3. SALVAR NO BANCO
   async function finalizarCadastro() {
     setCarregando(true)
     try {
       let produtoId = null
 
       if (isLoteMode && produtoExistente) {
-        // A. JÁ EXISTE: Atualiza o preço universal de venda
         produtoId = produtoExistente.id
         await supabase.from('produtos')
           .update({ preco_venda: parseFloat(dados.precoVenda) || 0 })
           .eq('id', produtoId)
       } else {
-        // B. NOVO: Cria o produto no catálogo principal
         const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
           nome: dados.nome,
           tipo: dados.tipo,
@@ -278,7 +273,6 @@ export default function CadastroProduto() {
         produtoId = novoProduto.id
       }
 
-      // C. CRIA A FILA (LOTE)
       const { data: loteAtivo } = await supabase.from('estoque_lotes')
         .select('id').eq('produto_id', produtoId).eq('status', 'ativo').limit(1)
 
@@ -313,9 +307,6 @@ export default function CadastroProduto() {
     setEtapa(1)
   }
 
-  // ==========================================
-  // TELA DE SUCESSO
-  // ==========================================
   if (sucesso) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center px-4 py-12">
@@ -359,12 +350,10 @@ export default function CadastroProduto() {
         <div className="overflow-hidden">
           <AnimatePresence mode="wait" custom={slideDirection}>
 
-            {/* ETAPA 1: O PORTEIRO (CÓDIGO DE BARRAS) */}
             {etapa === 1 && (
               <motion.div key="etapa1" custom={slideDirection} variants={stepVariants} initial="initial" animate="animate" exit="exit">
                 <StepLabel>Identifique o Produto</StepLabel>
 
-                {/* CAMPO DE INPUT COM BOTÃO DA CÂMERA */}
                 <div className="flex items-start gap-2">
                   <StyledInput
                     icon={Barcode}
@@ -415,7 +404,6 @@ export default function CadastroProduto() {
               </motion.div>
             )}
 
-            {/* ETAPA ESPECIAL: MODO LOTE (Se achou o código, vem pra cá e fim) */}
             {etapa === 2 && isLoteMode && (
               <motion.div key="etapaLote" custom={slideDirection} variants={stepVariants} initial="initial" animate="animate" exit="exit">
                 <StepLabel>Nova Remessa</StepLabel>
@@ -440,7 +428,8 @@ export default function CadastroProduto() {
                   />
 
                   <div className="mt-4">
-                    <PrimaryButton onClick={finalizarCadastro} disabled={carregando} icon={carregando ? null : CheckCircle}>
+                    {/* O BOTÃO AGORA SÓ FICA ATIVO QUANDO TUDO ESTIVER PREENCHIDO */}
+                    <PrimaryButton onClick={finalizarCadastro} disabled={carregando || !formValido} icon={carregando ? null : CheckCircle}>
                       {carregando ? 'Salvando…' : 'Finalizar Adição'}
                     </PrimaryButton>
                   </div>
@@ -452,7 +441,6 @@ export default function CadastroProduto() {
               </motion.div>
             )}
 
-            {/* FLUXO MANUAL (Se não achou o código, segue o fluxo normal) */}
             {etapa === 2 && !isLoteMode && (
               <motion.div key="etapa2" custom={slideDirection} variants={stepVariants} initial="initial" animate="animate" exit="exit">
                 <StepLabel>Em qual setor se encaixa?</StepLabel>
@@ -508,7 +496,8 @@ export default function CadastroProduto() {
                   <StyledInput icon={Tag} label="Preço de Venda (R$)" type="number" placeholder="0,00" inputMode="decimal" value={dados.precoVenda} onChange={e => setDados({ ...dados, precoVenda: e.target.value })} />
 
                   <div className="mt-2">
-                    <PrimaryButton onClick={finalizarCadastro} disabled={carregando} icon={carregando ? null : CheckCircle}>
+                    {/* O BOTÃO AGORA SÓ FICA ATIVO QUANDO TUDO ESTIVER PREENCHIDO */}
+                    <PrimaryButton onClick={finalizarCadastro} disabled={carregando || !formValido} icon={carregando ? null : CheckCircle}>
                       {carregando ? 'Salvando…' : 'Finalizar Cadastro'}
                     </PrimaryButton>
                   </div>
@@ -534,7 +523,7 @@ export default function CadastroProduto() {
               onSucesso={handleCameraSucesso}
               onFechar={() => {
                 setCameraAtiva(false);
-                travaCameraRef.current = false; // Destrava se ele só fechar
+                travaCameraRef.current = false;
               }}
             />
           ) : (
@@ -559,7 +548,7 @@ export default function CadastroProduto() {
                     <button 
                       onClick={() => {
                         setCodigoLidoCamera(null);
-                        setTimeout(() => { travaCameraRef.current = false }, 400); // Destrava e tenta ler outro
+                        setTimeout(() => { travaCameraRef.current = false }, 400);
                       }} 
                       className="py-4 font-bold text-gray-500 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center gap-1.5 active:scale-95"
                     >
@@ -569,7 +558,7 @@ export default function CadastroProduto() {
                       onClick={() => { 
                         setCodigoLidoCamera(null); 
                         setCameraAtiva(false); 
-                        travaCameraRef.current = false; // Destrava e fecha a tela
+                        travaCameraRef.current = false;
                       }} 
                       className="py-4 font-bold text-white bg-red-500 rounded-xl hover:bg-red-600 transition-colors flex items-center justify-center gap-1.5 active:scale-95"
                     >

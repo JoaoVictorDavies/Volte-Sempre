@@ -184,7 +184,6 @@ export default function OrganizacaoCatalogo() {
     <div className="min-h-screen bg-[#F5F5F7] px-4 py-10 animate-in fade-in duration-300">
       <div className="max-w-5xl mx-auto">
         
-        {/* HEADER */}
         <header className="mb-10">
           <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline focus:outline-none">
             <ArrowLeft size={16} /> Voltar ao Painel
@@ -195,10 +194,9 @@ export default function OrganizacaoCatalogo() {
           <p className="text-[#86868B] mt-1 text-sm">Crie as categorias (Setores) e as linhas (Marcas) da sua loja.</p>
         </header>
 
-        {/* ÁREA PRINCIPAL: DUAS COLUNAS */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           
-          {/* COLUNA 1: SETORES */}
+          {/* SETORES */}
           <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col h-[480px]">
             <div className="flex items-center gap-2 mb-6">
               <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
@@ -223,7 +221,6 @@ export default function OrganizacaoCatalogo() {
               </button>
             </form>
 
-            {/* LISTA LIMITADA DE SETORES (Força o corte visual para mostrar que rola) */}
             <div className="relative flex-1 overflow-hidden">
               <div className="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-white to-transparent pointer-events-none z-10"></div>
               <div className="h-full overflow-y-auto space-y-2 pr-2 custom-scrollbar pb-6">
@@ -244,20 +241,21 @@ export default function OrganizacaoCatalogo() {
                     ) : (
                       <div 
                         onClick={() => setSetorSelecionado(setor)}
-                        className={`group flex items-center justify-between p-4 rounded-xl cursor-pointer transition-all border-2 ${setorSelecionado?.id === setor.id ? 'bg-blue-50 border-blue-500' : 'bg-white border-gray-100 hover:border-blue-200'}`}
+                        className={`flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border-2 ${setorSelecionado?.id === setor.id ? 'bg-blue-50 border-blue-500' : 'bg-white border-gray-100 hover:border-blue-200'}`}
                       >
-                        <span className={`font-bold ${setorSelecionado?.id === setor.id ? 'text-blue-700' : 'text-gray-700'}`}>
+                        <span className={`font-bold ml-1 ${setorSelecionado?.id === setor.id ? 'text-blue-700' : 'text-gray-700'}`}>
                           {setor.nome}
                         </span>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                          {/* BOTÃO DE EDIÇÃO AGORA É SEMPRE VISÍVEL */}
                           <button 
                             onClick={(e) => iniciarEdicaoSetor(setor, e)}
-                            className="text-gray-300 hover:text-blue-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="text-blue-500 bg-blue-50 hover:bg-blue-100 p-2 rounded-lg transition-colors"
                             title="Editar / Excluir"
                           >
                             <Edit2 size={16} />
                           </button>
-                          <ChevronRight size={18} className={setorSelecionado?.id === setor.id ? 'text-blue-500' : 'text-gray-300'} />
+                          <ChevronRight size={20} className={setorSelecionado?.id === setor.id ? 'text-blue-500 ml-1' : 'text-gray-300 ml-1'} />
                         </div>
                       </div>
                     )}
@@ -270,7 +268,7 @@ export default function OrganizacaoCatalogo() {
             </div>
           </div>
 
-          {/* COLUNA 2: MARCAS */}
+          {/* MARCAS */}
           <div className={`bg-white rounded-3xl p-6 shadow-sm border border-gray-100 flex flex-col h-[480px] transition-opacity duration-300 ${!setorSelecionado ? 'opacity-50 pointer-events-none grayscale-[0.5]' : ''}`}>
             <div className="flex items-center gap-2 mb-6">
               <div className="w-10 h-10 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center">
@@ -318,11 +316,12 @@ export default function OrganizacaoCatalogo() {
                           <button onClick={cancelarEdicaoMarca} className="p-2 bg-gray-200 text-gray-600 rounded-lg hover:bg-gray-300"><X size={16}/></button>
                         </div>
                       ) : (
-                        <div className="group flex items-center justify-between p-4 rounded-xl bg-[#F9F9FB] hover:bg-purple-50 border border-transparent hover:border-purple-100 transition-colors">
-                          <span className="font-bold text-gray-700">{marca.nome}</span>
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-[#F9F9FB] border border-transparent transition-colors">
+                          <span className="font-bold text-gray-700 ml-1">{marca.nome}</span>
+                          {/* BOTÃO DE EDIÇÃO AGORA É SEMPRE VISÍVEL */}
                           <button 
                             onClick={() => iniciarEdicaoMarca(marca)}
-                            className="text-gray-300 hover:text-purple-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="text-purple-500 bg-purple-50 hover:bg-purple-100 p-2 rounded-lg transition-colors"
                             title="Editar / Excluir"
                           >
                             <Edit2 size={16} />
