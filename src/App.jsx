@@ -7,12 +7,13 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
-import CadastroPrecisao from './pages/CadastroPrecisao'
+import CadastroPrecisao from './pages/organizacacatalogo'
 import FuncionarioHome from './pages/FuncionarioHome'
 import Pdv from './pages/Pdv'
 import Financeiro from './pages/Financeiro'
 import TesteImpressora from './pages/TesteImpressora'
 import Equipe from './pages/Equipe' 
+import OrganizacaoCatalogo from './pages/OrganizacaoCatalogo'
 
 export default function App() {
   // Verifica na memória do celular/PC se a pessoa já colocou a senha global antes
@@ -88,7 +89,7 @@ export default function App() {
           {/* Rotas do Admin */}
           <Route path="/admin-home" element={<AdminHome />} />
           <Route path="/cadastro-produto" element={<CadastroProduto />} />
-          <Route path="/cadastro-precisao" element={<CadastroPrecisao />} />
+          <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
           <Route path="/estoque" element={<Estoque />} />
           <Route path="/financeiro" element={<Financeiro />} />
           <Route path="/teste-impressora" element={<TesteImpressora />} />
@@ -107,3 +108,4 @@ export default function App() {
     </BrowserRouter>
   )
 }
+

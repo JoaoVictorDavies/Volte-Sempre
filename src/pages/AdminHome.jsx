@@ -182,7 +182,7 @@ export default function AdminHome() {
 
             {/* Card — Cadastro com Precisão */}
             <Link
-              to="/cadastro-precisao"
+              to="/organizacao-catalogo"
               className="group flex flex-col justify-between bg-white rounded-3xl p-8 transition-all duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
               style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
               aria-label="Ir para Cadastro com Precisão"
