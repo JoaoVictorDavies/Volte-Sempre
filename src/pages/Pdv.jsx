@@ -24,13 +24,24 @@ export default function Pdv() {
   const total = carrinho.reduce((acc, item) => acc + (item.qtd * item.preco_venda), 0)
   const troco = metodo === 'dinheiro' && valorRecebido ? parseFloat(valorRecebido) - total : 0
 
-  // 1. CARREGAR ESTOQUE
+  // ==========================================
+  // 1. CARREGAR ESTOQUE (COM A NOVA FILA DE LOTES)
+  // ==========================================
   const carregarEstoque = async () => {
     try {
-      const { data, error } = await supabase.from('produtos').select('*')
-      if (!error) setEstoqueCompleto(data || [])
+      const { data, error } = await supabase.from('produtos').select('*, estoque_lotes(*)')
+      if (error) throw error
+
+      // Calcula o estoque real varrendo a tabela de lotes
+      const estoqueProcessado = (data || []).map(p => {
+        const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
+        const estoqueTotal = lotesValidos.reduce((acc, l) => acc + l.quantidade_atual, 0)
+        return { ...p, estoqueTotal }
+      }).filter(p => p.estoqueTotal > 0) // Só traz o que realmente tem na loja
+
+      setEstoqueCompleto(estoqueProcessado)
     } catch (error) {
-      console.error(error)
+      console.error("Erro ao carregar estoque:", error)
     }
   }
 
@@ -38,7 +49,9 @@ export default function Pdv() {
     carregarEstoque()
   }, [])
 
+  // ==========================================
   // 2. BUSCA EM TEMPO REAL
+  // ==========================================
   useEffect(() => {
     if (busca.trim() === '') {
       setResultadosBusca([])
@@ -46,17 +59,18 @@ export default function Pdv() {
     }
     const termo = busca.toLowerCase()
     const filtrados = estoqueCompleto.filter(p => 
-      (p.nome.toLowerCase().includes(termo) || (p.codigo_barras && p.codigo_barras.includes(termo))) &&
-      p.estoque > 0 
+      (p.nome.toLowerCase().includes(termo) || (p.codigo_barras && p.codigo_barras.includes(termo)))
     )
     setResultadosBusca(filtrados)
   }, [busca, estoqueCompleto])
 
+  // ==========================================
   // 3. CONTROLE DO CARRINHO
+  // ==========================================
   const adicionarAoCarrinho = (produto) => {
     const itemExistente = carrinho.find(item => item.id === produto.id)
     if (itemExistente) {
-      if (itemExistente.qtd < produto.estoque) {
+      if (itemExistente.qtd < produto.estoqueTotal) {
         setCarrinho(carrinho.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item))
       } else {
         alert('Quantidade máxima em estoque atingida!')
@@ -71,7 +85,7 @@ export default function Pdv() {
     setCarrinho(carrinho.map(item => {
       if (item.id === id) {
         const novaQtd = item.qtd + delta
-        if (novaQtd > 0 && novaQtd <= item.estoque) {
+        if (novaQtd > 0 && novaQtd <= item.estoqueTotal) {
           return { ...item, qtd: novaQtd }
         }
       }
@@ -83,7 +97,9 @@ export default function Pdv() {
     setCarrinho(carrinho.filter(item => item.id !== id))
   }
 
+  // ==========================================
   // 4. LÓGICA DA CALCULADORA
+  // ==========================================
   const calcular = (expressao) => {
     try {
       const expressaoLimpa = expressao.replace(/[^-()\d/*+.]/g, '')
@@ -95,7 +111,9 @@ export default function Pdv() {
     }
   }
 
-// 5. FINALIZAR A VENDA
+  // ==========================================
+  // 5. FINALIZAR A VENDA E PROCESSAR A FILA DE LOTES (PEPS)
+  // ==========================================
   const finalizarCompra = async () => {
     if (metodo === 'dinheiro' && (valorRecebido === '' || parseFloat(valorRecebido) < total)) {
       alert("O valor recebido é menor que o total da compra!")
@@ -105,11 +123,11 @@ export default function Pdv() {
     setProcessandoVenda(true)
 
     try {
-      // -> NOVIDADE AQUI: Pega a sessão ativa da memória
+      // Pega a sessão ativa da memória
       const sessaoSalva = localStorage.getItem('volte_sessao_caixa')
       const sessao = sessaoSalva ? JSON.parse(sessaoSalva) : null
 
-      // -> NOVIDADE AQUI: Inserimos o sessao_id junto com os dados da venda
+      // A. Cria o recibo geral da venda
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
         .insert([{ 
@@ -117,24 +135,59 @@ export default function Pdv() {
           metodo_pagamento: metodo, 
           valor_recebido: metodo === 'dinheiro' ? parseFloat(valorRecebido) : total,
           troco: troco > 0 ? troco : 0,
-          sessao_id: sessao ? sessao.id : null // Carimba a venda no nome do operador
+          sessao_id: sessao ? sessao.id : null 
         }])
         .select()
         .single()
 
       if (erroVenda) throw erroVenda
-      for (const item of carrinho) {
-        await supabase.from('vendas_itens').insert([{
-          venda_id: vendaCadastrada.id,
-          produto_id: item.id,
-          nome: item.nome,
-          quantidade: item.qtd,
-          preco_custo: item.preco_custo,
-          preco_venda: item.preco_venda
-        }])
 
-        const novoEstoque = item.estoque - item.qtd
-        await supabase.from('produtos').update({ estoque: novoEstoque }).eq('id', item.id)
+      // B. Processa cada item do carrinho dando baixa nos Lotes Corretos (A Mágica)
+      for (const item of carrinho) {
+        let qtdRestanteParaBaixar = item.qtd
+
+        // Busca os lotes desse produto que têm estoque (do mais velho pro mais novo)
+        const { data: lotes } = await supabase
+          .from('estoque_lotes')
+          .select('*')
+          .eq('produto_id', item.id)
+          .gt('quantidade_atual', 0)
+
+        // Ordena no front: 'ativo' sempre em primeiro, depois pela data
+        const lotesOrdenados = lotes.sort((a, b) => {
+          if (a.status === 'ativo' && b.status !== 'ativo') return -1;
+          if (a.status !== 'ativo' && b.status === 'ativo') return 1;
+          return new Date(a.criado_em) - new Date(b.criado_em);
+        });
+
+        // Deduz da fila
+        for (const lote of lotesOrdenados) {
+          if (qtdRestanteParaBaixar <= 0) break; // Já baixou tudo que precisava
+
+          // Vê quanto dá pra tirar desse lote
+          const qtdDeducao = Math.min(qtdRestanteParaBaixar, lote.quantidade_atual)
+          const novaQtdLote = lote.quantidade_atual - qtdDeducao
+          
+          // Se o lote zerar, esgotou. Se ainda sobrar e ele estava em espera, ele "acorda" e vira ativo.
+          const novoStatus = novaQtdLote === 0 ? 'esgotado' : 'ativo'
+
+          // Atualiza o Lote no Banco
+          await supabase.from('estoque_lotes')
+            .update({ quantidade_atual: novaQtdLote, status: novoStatus })
+            .eq('id', lote.id)
+
+          // Registra o item na venda com o CUSTO EXATO deste lote
+          await supabase.from('vendas_itens').insert([{
+            venda_id: vendaCadastrada.id,
+            produto_id: item.id,
+            nome: item.nome,
+            quantidade: qtdDeducao,
+            preco_custo: lote.preco_custo, 
+            preco_venda: item.preco_venda
+          }])
+
+          qtdRestanteParaBaixar -= qtdDeducao
+        }
       }
 
       alert("✅ Venda finalizada com sucesso!")
@@ -142,7 +195,7 @@ export default function Pdv() {
       setModalAberto(false)
       setValorRecebido('')
       setMetodo('pix')
-      carregarEstoque() 
+      carregarEstoque() // Atualiza os estoques na tela
 
     } catch (error) {
       alert("Erro ao finalizar venda: " + error.message)
@@ -191,7 +244,7 @@ export default function Pdv() {
                 <button key={p.id} onClick={() => adicionarAoCarrinho(p)} className="w-full text-left p-4 hover:bg-blue-50 border-b border-gray-100 flex justify-between items-center transition-colors">
                   <div>
                     <div className="font-bold text-gray-800">{p.nome}</div>
-                    <div className="text-sm text-gray-500">Estoque: {p.estoque} | Cód: {p.codigo_barras || 'N/A'}</div>
+                    <div className="text-sm text-gray-500">Estoque: {p.estoqueTotal} | Cód: {p.codigo_barras || 'N/A'}</div>
                   </div>
                   <div className="font-bold text-green-600">R$ {Number(p.preco_venda).toFixed(2)}</div>
                 </button>
@@ -312,7 +365,7 @@ export default function Pdv() {
       )}
 
       {/* =========================================
-          MODAL DA CALCULADORA (BEM FORMATADO)
+          MODAL DA CALCULADORA
           ========================================= */}
       {calcAberto && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 animate-in fade-in">
