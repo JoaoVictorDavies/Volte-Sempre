@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
+import { Camera } from 'lucide-react'
+import LeitorInterativo from '../components/LeitorInterativo' // ← Importamos o nosso leitor interativo modular
 
 export default function Pdv() {
   const navigate = useNavigate()
@@ -23,6 +25,9 @@ export default function Pdv() {
 
   // Estado da Sessão Logada
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
+
+  // Estado do Acionador do Modo Câmera Turbo
+  const [cameraAtiva, setCameraAtiva] = useState(false)
 
   const total = carrinho.reduce((acc, item) => acc + (item.qtd * item.preco_venda), 0)
   const troco = metodo === 'dinheiro' && valorRecebido ? parseFloat(valorRecebido) - total : 0
@@ -51,12 +56,12 @@ export default function Pdv() {
       const { data, error } = await supabase.from('produtos').select('*, estoque_lotes(*)')
       if (error) throw error
 
-      // Calcula o estoque real varrendo a tabela de lotes válidos
+      // Calcula o estoque real mapeando apenas os lotes ativos com saldo
       const estoqueProcessado = (data || []).map(p => {
         const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
         const estoqueTotal = lotesValidos.reduce((acc, l) => acc + l.quantidade_atual, 0)
         return { ...p, estoqueTotal }
-      }).filter(p => p.estoqueTotal > 0) // Esconde produtos completamente zerados
+      }).filter(p => p.estoqueTotal > 0) // Remove o que sumiu do acervo
 
       setEstoqueCompleto(estoqueProcessado)
     } catch (error) {
@@ -65,7 +70,7 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // 3. BUSCA EM TEMPO REAL
+  // 3. BUSCA EM TEMPO REAL (INPUT TRADICIONAL)
   // ==========================================
   useEffect(() => {
     if (busca.trim() === '') {
@@ -80,7 +85,7 @@ export default function Pdv() {
   }, [busca, estoqueCompleto])
 
   // ==========================================
-  // 4. CONTROLE DO CARRINHO
+  // 4. CONTROLE DO CARRINHO (AÇÕES GERAIS)
   // ==========================================
   const adicionarAoCarrinho = (produto) => {
     const itemExistente = carrinho.find(item => item.id === produto.id)
@@ -127,7 +132,7 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // 6. FINALIZAR A VENDA (MOTOR PEPS DE LOTES)
+  // 6. FINALIZAR A VENDA (MOTOR DE DEDUÇÃO PEPS)
   // ==========================================
   const finalizarCompra = async () => {
     if (metodo === 'dinheiro' && (valorRecebido === '' || parseFloat(valorRecebido) < total)) {
@@ -138,7 +143,6 @@ export default function Pdv() {
     setProcessandoVenda(true)
 
     try {
-      // Cria a venda amarrada à sessão do funcionário e à loja dele
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
         .insert([{ 
@@ -154,40 +158,32 @@ export default function Pdv() {
 
       if (erroVenda) throw erroVenda
 
-      // Varre o carrinho para abater os lotes corretos (Fila Invisível)
       for (const item of carrinho) {
         let qtdRestanteParaBaixar = item.qtd
 
-        // Busca todos os lotes que têm unidades disponíveis
         const { data: lotes } = await supabase
           .from('estoque_lotes')
           .select('*')
           .eq('produto_id', item.id)
           .gt('quantidade_atual', 0)
 
-        // Ordena: 'ativo' vem sempre primeiro (se houver), seguido da data de entrada (PEPS)
         const lotesOrdenados = (lotes || []).sort((a, b) => {
           if (a.status === 'ativo' && b.status !== 'ativo') return -1;
           if (a.status !== 'ativo' && b.status === 'ativo') return 1;
           return new Date(a.criado_em) - new Date(b.criado_em);
         });
 
-        // Consome da fila lote por lote
         for (const lote of lotesOrdenados) {
           if (qtdRestanteParaBaixar <= 0) break;
 
           const qtdDeducao = Math.min(qtdRestanteParaBaixar, lote.quantidade_atual)
           const novaQtdLote = lote.quantidade_atual - qtdDeducao
-          
-          // Se o lote zerou completamente, muda o status. Se sobrou estoque, vira ativo.
           const novoStatus = novaQtdLote === 0 ? 'esgotado' : 'ativo'
 
-          // Atualiza o lote consumido
           await supabase.from('estoque_lotes')
             .update({ quantidade_atual: novaQtdLote, status: novoStatus })
             .eq('id', lote.id)
 
-          // Grava o item vendido com o custo exato obtido desse lote específico
           await supabase.from('vendas_itens').insert([{
             venda_id: vendaCadastrada.id,
             produto_id: item.id,
@@ -207,7 +203,7 @@ export default function Pdv() {
       setModalAberto(false)
       setValorRecebido('')
       setMetodo('pix')
-      carregarEstoque() // Recarrega os dados atualizados para a tela
+      carregarEstoque()
 
     } catch (error) {
       alert("Erro ao finalizar venda: " + error.message)
@@ -239,15 +235,26 @@ export default function Pdv() {
           </button>
         </header>
 
-        {/* BARRA DE BUSCA */}
+        {/* BARRA DE BUSCA COM ACIONAMENTO TURBO DA CÂMERA */}
         <div className="p-4 bg-gray-50 border-b border-gray-200 z-20 relative">
-          <div className="relative">
-            <input 
-              type="text" autoFocus value={busca} onChange={(e) => setBusca(e.target.value)}
-              placeholder="Bipe o código ou digite o nome..."
-              className="w-full pl-12 pr-4 py-4 rounded-xl border-2 border-blue-200 focus:border-blue-500 outline-none text-lg shadow-inner"
-            />
-            <span className="absolute left-4 top-4 text-2xl">🔍</span>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input 
+                type="text" autoFocus value={busca} onChange={(e) => setBusca(e.target.value)}
+                placeholder="Bipe o código ou digite o nome..."
+                className="w-full pl-12 pr-4 py-4 rounded-xl border-2 border-blue-200 focus:border-blue-500 outline-none text-lg shadow-inner"
+              />
+              <span className="absolute left-4 top-4 text-2xl">🔍</span>
+            </div>
+            
+            {/* DISPARADOR DO MODAL DE CAMERA INTEGRADO */}
+            <button 
+              onClick={() => setCameraAtiva(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-5 rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-95"
+              title="Ativar Modo Câmera"
+            >
+              <Camera size={24} />
+            </button>
           </div>
 
           {resultadosBusca.length > 0 && (
@@ -320,7 +327,18 @@ export default function Pdv() {
       </div>
 
       {/* =========================================
-          MODAL DE COBRANÇA
+          CHAMADA REUTILIZÁVEL DO LEITOR INTERATIVO TURBO
+          ========================================= */}
+      {cameraAtiva && (
+        <LeitorInterativo 
+          catalogo={estoqueCompleto} 
+          aoConfirmar={(produto) => adicionarAoCarrinho(produto)}
+          aoFechar={() => setCameraAtiva(false)}
+        />
+      )}
+
+      {/* =========================================
+          MODALS DE COBRANÇA E CALCULADORA
           ========================================= */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black bg-opacity-70 z-[100] flex items-center justify-center p-4 animate-in fade-in">
@@ -376,9 +394,6 @@ export default function Pdv() {
         </div>
       )}
 
-      {/* =========================================
-          MODAL DA CALCULADORA
-          ========================================= */}
       {calcAberto && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
