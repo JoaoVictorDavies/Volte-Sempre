@@ -12,6 +12,8 @@ import FuncionarioHome from './pages/FuncionarioHome'
 import Pdv from './pages/Pdv'
 import Financeiro from './pages/Financeiro'
 import TesteImpressora from './pages/TesteImpressora'
+import Equipe from './pages/Equipe' // <-- Importamos a nova página de Equipe aqui
+
 export default function App() {
   // Verifica na memória do celular/PC se a pessoa já colocou a senha global antes
   const [acessoGlobal, setAcessoGlobal] = useState(
@@ -84,12 +86,14 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           
           {/* Rotas do Admin */}
-<Route path="/admin-home" element={<AdminHome />} />
-<Route path="/cadastro-produto" element={<CadastroProduto />} />
-<Route path="/cadastro-precisao" element={<CadastroPrecisao />} />
-<Route path="/estoque" element={<Estoque />} />
-<Route path="/financeiro" element={<Financeiro />} />
-<Route path="/teste-impressora" element={<TesteImpressora />} />
+          <Route path="/admin-home" element={<AdminHome />} />
+          <Route path="/cadastro-produto" element={<CadastroProduto />} />
+          <Route path="/cadastro-precisao" element={<CadastroPrecisao />} />
+          <Route path="/estoque" element={<Estoque />} />
+          <Route path="/financeiro" element={<Financeiro />} />
+          <Route path="/teste-impressora" element={<TesteImpressora />} />
+          <Route path="/equipe" element={<Equipe />} /> {/* <-- Adicionamos a rota de Equipe aqui */}
+          
           {/* Rotas do Funcionário */}
           <Route path="/funcionario-home" element={<FuncionarioHome />} />
         </Route>

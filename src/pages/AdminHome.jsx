@@ -225,34 +225,30 @@ export default function AdminHome() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-            {/* Card — Em breve */}
-            <div
-              className="flex flex-col justify-between bg-white/50 rounded-3xl p-8 opacity-50 cursor-not-allowed select-none"
-              style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.04)' }}
-              aria-disabled="true"
-              title="Em breve disponível"
+            {/* Card — Gerenciar Funcionários */}
+            <Link
+              to="/equipe"
+              className="group flex flex-col justify-between bg-white rounded-3xl p-8 transition-all duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
             >
               <div>
-                <div className="w-10 h-10 rounded-2xl bg-[#F5F5F7] flex items-center justify-center text-[#86868B] mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center text-indigo-500 mb-5">
                   <LockIcon />
                 </div>
                 <h3
                   className="text-lg font-semibold text-[#1D1D1F] leading-snug"
                   style={{ letterSpacing: '-0.01em' }}
                 >
-                  Gerenciar Funcionários
+                  Gerenciar Equipe
                 </h3>
                 <p className="text-[#86868B] mt-2 text-sm leading-relaxed">
-                  Em breve: Crie acessos rápidos (PIN) para os caixas da sua loja.
+                  Crie acessos rápidos (PIN) para os caixas e gerencie os funcionários da loja.
                 </p>
               </div>
-              <div className="mt-6">
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#86868B] bg-[#F5F5F7] px-3 py-1.5 rounded-full">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#86868B] inline-block" />
-                  Em breve
-                </span>
+              <div className="mt-6 flex items-center text-indigo-500 text-sm font-medium gap-1 transition-all duration-300 group-hover:gap-2">
+                Acessar <ChevronRightIcon />
               </div>
-            </div>
+            </Link>
 
           </div>
         </section>
