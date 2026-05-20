@@ -94,7 +94,7 @@ export default function Login() {
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
                   transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                  onClick={() => navigate('/funcionario-home')}
+                  onClick={() => navigate('/caixa')}
                   className="group flex items-center gap-4 w-full p-6 bg-white/70 backdrop-blur-md rounded-3xl border border-white/60 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                   style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
                   aria-label="Entrar como Vendedor"

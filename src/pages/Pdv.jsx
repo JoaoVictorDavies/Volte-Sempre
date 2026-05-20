@@ -34,7 +34,7 @@ export default function Pdv() {
     const sessaoSalva = localStorage.getItem('volte_sessao_caixa')
     if (!sessaoSalva) {
       alert("Acesso negado! Por favor, insira seu PIN para abrir ou retomar um caixa.")
-      navigate('/funcionario-home')
+      navigate('/caixa')
       return
     }
     
@@ -227,7 +227,7 @@ export default function Pdv() {
         {/* CABEÇALHO */}
         <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10">
           <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/funcionario-home')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Painel</button>
+            <button onClick={() => navigate('/caixa')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Painel</button>
             <h1 className="text-xl font-bold text-blue-700">Caixa: {sessaoAtiva?.operador || 'Carregando...'}</h1>
           </div>
           

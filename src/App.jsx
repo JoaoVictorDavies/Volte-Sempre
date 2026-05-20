@@ -12,7 +12,7 @@ import FuncionarioHome from './pages/FuncionarioHome'
 import Pdv from './pages/Pdv'
 import Financeiro from './pages/Financeiro'
 import TesteImpressora from './pages/TesteImpressora'
-import Equipe from './pages/Equipe' // <-- Importamos a nova página de Equipe aqui
+import Equipe from './pages/Equipe' 
 
 export default function App() {
   // Verifica na memória do celular/PC se a pessoa já colocou a senha global antes
@@ -95,7 +95,7 @@ export default function App() {
           <Route path="/equipe" element={<Equipe />} /> {/* <-- Adicionamos a rota de Equipe aqui */}
           
           {/* Rotas do Funcionário */}
-          <Route path="/funcionario-home" element={<FuncionarioHome />} />
+          <Route path="/caixa" element={<CaixaHome />} />
         </Route>
         
         {/* PDV (Fora do layout para usar a tela cheia e girar no celular) */}

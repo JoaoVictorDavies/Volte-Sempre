@@ -4,7 +4,7 @@ import { supabase } from '../services/supabase'
 import { Lock, Unlock, LogOut, ShieldAlert, ArrowRight, Printer } from 'lucide-react'
 import ThermalPrinterEncoder from 'thermal-printer-encoder'
 
-export default function FuncionarioHome() {
+export default function CaixaHome() {
   const navigate = useNavigate()
   
   const [pin, setPin] = useState('')
