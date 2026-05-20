@@ -135,6 +135,9 @@ export default function CadastroProduto() {
   
   const [cameraAtiva, setCameraAtiva] = useState(false)
   const [codigoLidoCamera, setCodigoLidoCamera] = useState(null)
+  
+  // A TRAVA DO GATILHO DA CÂMERA
+  const travaCameraRef = useRef(false)
 
   // Dados do Banco
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
@@ -204,6 +207,13 @@ export default function CadastroProduto() {
     }
   }
 
+  // Ação ao ler o código na câmera
+  const handleCameraSucesso = (codigo) => {
+    if (travaCameraRef.current) return;
+    travaCameraRef.current = true; // Baixa a trava
+    setCodigoLidoCamera(codigo);
+  }
+
   // Ação ao confirmar o código lido na câmera
   const confirmarCodigoLido = async () => {
     setCameraAtiva(false)
@@ -212,6 +222,9 @@ export default function CadastroProduto() {
 
     const codigoFinal = codigoLidoCamera
     setCodigoLidoCamera(null)
+    
+    // Libera a trava para a próxima vez que abrir a câmera
+    setTimeout(() => { travaCameraRef.current = false }, 400)
 
     // Faz a consulta do produto logo após confirmar o código
     const { data } = await supabase.from('produtos').select('*').eq('codigo_barras', codigoFinal).single()
@@ -518,8 +531,11 @@ export default function CadastroProduto() {
         <div className="fixed inset-0 z-[500] bg-black">
           {!codigoLidoCamera ? (
             <LeitorCamera
-              onSucesso={(codigo) => setCodigoLidoCamera(codigo)}
-              onFechar={() => setCameraAtiva(false)}
+              onSucesso={handleCameraSucesso}
+              onFechar={() => {
+                setCameraAtiva(false);
+                travaCameraRef.current = false; // Destrava se ele só fechar
+              }}
             />
           ) : (
             <div className="absolute inset-0 z-[600] bg-black/85 backdrop-blur-sm flex flex-col justify-center items-center p-6 animate-in zoom-in-95 duration-150">
@@ -541,13 +557,20 @@ export default function CadastroProduto() {
                   
                   <div className="grid grid-cols-2 gap-3 mt-2">
                     <button 
-                      onClick={() => setCodigoLidoCamera(null)} 
+                      onClick={() => {
+                        setCodigoLidoCamera(null);
+                        setTimeout(() => { travaCameraRef.current = false }, 400); // Destrava e tenta ler outro
+                      }} 
                       className="py-4 font-bold text-gray-500 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center gap-1.5 active:scale-95"
                     >
                       <X size={18} /> Refazer
                     </button>
                     <button 
-                      onClick={() => { setCodigoLidoCamera(null); setCameraAtiva(false); }} 
+                      onClick={() => { 
+                        setCodigoLidoCamera(null); 
+                        setCameraAtiva(false); 
+                        travaCameraRef.current = false; // Destrava e fecha a tela
+                      }} 
                       className="py-4 font-bold text-white bg-red-500 rounded-xl hover:bg-red-600 transition-colors flex items-center justify-center gap-1.5 active:scale-95"
                     >
                       <ArrowLeft size={18} /> Voltar
