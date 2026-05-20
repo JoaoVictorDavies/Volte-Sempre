@@ -180,12 +180,12 @@ export default function AdminHome() {
               </div>
             </Link>
 
-            {/* Card — Cadastro com Precisão */}
+            {/* Card — Organização do Catálogo */}
             <Link
               to="/organizacao-catalogo"
               className="group flex flex-col justify-between bg-white rounded-3xl p-8 transition-all duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
               style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
-              aria-label="Ir para Cadastro com Precisão"
+              aria-label="Ir para Organização do Catálogo"
             >
               <div>
                 <div className="w-10 h-10 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-500 mb-5">
@@ -195,13 +195,13 @@ export default function AdminHome() {
                   className="text-lg font-semibold text-[#1D1D1F] leading-snug"
                   style={{ letterSpacing: '-0.01em' }}
                 >
-                  Cadastro com Precisão
+                  Organização do Catálogo
                   <span className="ml-2 text-xs font-medium text-purple-400 bg-purple-50 px-2 py-0.5 rounded-full align-middle">
-                    Computador
+                    Estrutura
                   </span>
                 </h3>
                 <p className="text-[#86868B] mt-2 text-sm leading-relaxed">
-                  Tela única com todos os detalhes. Ideal para o computador e grandes volumes de cadastro.
+                  Crie e gerencie os Setores (categorias) e as Marcas da sua loja. O alicerce do seu estoque.
                 </p>
               </div>
               <div className="mt-6 flex items-center text-purple-500 text-sm font-medium gap-1 transition-all duration-300 group-hover:gap-2">
