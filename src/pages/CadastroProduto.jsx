@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, ArrowRight, CheckCircle, Tag, FileText, Barcode, DollarSign, Hash, ChevronRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle, Tag, FileText, Barcode, DollarSign, Hash, ChevronRight, AlertCircle } from 'lucide-react'
 
 let slideDirection = 1
 
@@ -95,7 +95,6 @@ function PrimaryButton({ onClick, disabled, children, icon: Icon = ArrowRight })
   )
 }
 
-// ── AJUSTE 1: inputs com fundo sólido, borda sutil e focus ring nítido ──
 function StyledInput({ icon: Icon, label, ...props }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -114,7 +113,7 @@ function StyledInput({ icon: Icon, label, ...props }) {
           {...props}
           className={`w-full h-14 bg-white border border-gray-200 rounded-2xl text-[#1D1D1F] placeholder-[#C7C7CC] text-base
             focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent
-            transition-all duration-200
+            transition-all duration-200 disabled:opacity-50 disabled:bg-gray-50
             ${Icon ? 'pl-11 pr-4' : 'px-4'}`}
         />
       </div>
@@ -130,6 +129,10 @@ export default function CadastroProduto() {
 
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
   const [marcasDoBanco, setMarcasDoBanco] = useState([])
+
+  // Estado para Produto Existente (Fila de Lotes)
+  const [produtoExistente, setProdutoExistente] = useState(null)
+  const debounceRef = useRef(null)
 
   const [dados, setDados] = useState({
     setorId: '', setorNome: '', marcaId: '', marcaNome: '',
@@ -159,19 +162,79 @@ export default function CadastroProduto() {
   const avancar = () => { slideDirection = 1;  setEtapa(e => e + 1) }
   const voltar  = () => { slideDirection = -1; setEtapa(e => e - 1) }
 
+  // Função para verificar se o código de barras já existe no banco
+  const handleCodigoBarrasChange = (e) => {
+    const codigo = e.target.value
+    setDados(prev => ({ ...prev, codigoBarras: codigo }))
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    
+    if (codigo.length >= 4) {
+      debounceRef.current = setTimeout(async () => {
+        const { data } = await supabase.from('produtos').select('*').eq('codigo_barras', codigo).single()
+        if (data) {
+          setProdutoExistente(data)
+          setDados(prev => ({ ...prev, nome: data.nome, precoVenda: data.preco_venda }))
+        } else {
+          setProdutoExistente(null)
+        }
+      }, 500) // Aguarda meio segundo após parar de digitar para não flodar o banco
+    } else {
+      setProdutoExistente(null)
+    }
+  }
+
   async function finalizarCadastro() {
     setCarregando(true)
     try {
-      const { error } = await supabase.from('produtos').insert([{
-        nome:          dados.nome,
-        tipo:          dados.tipo,
-        preco_custo:   parseFloat(dados.precoCusto) || 0,
-        preco_venda:   parseFloat(dados.precoVenda) || 0,
-        estoque:       parseInt(dados.estoque) || 0,
-        codigo_barras: dados.tipo === 'solo' ? dados.codigoBarras : null,
-        marca_id:      dados.marcaId
+      let produtoId = null;
+
+      if (produtoExistente) {
+        // PRODUTO JÁ EXISTE NO CATÁLOGO - Vamos apenas atualizar o preço universal e pegar o ID
+        produtoId = produtoExistente.id;
+        
+        await supabase.from('produtos')
+          .update({ preco_venda: parseFloat(dados.precoVenda) || 0 })
+          .eq('id', produtoId);
+
+      } else {
+        // PRODUTO NOVO - Cadastra no catálogo principal
+        const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
+          nome:          dados.nome,
+          tipo:          dados.tipo,
+          preco_venda:   parseFloat(dados.precoVenda) || 0,
+          codigo_barras: dados.tipo === 'solo' ? dados.codigoBarras : null,
+          marca_id:      dados.marcaId
+        }]).select().single()
+
+        // Se der erro de constraint (caso a busca em tempo real falhou mas o BD pegou na hora de salvar)
+        if (erroProd) {
+            if (erroProd.code === '23505') { // Erro padrão do Postgres para UNIQUE CONSTRAINT
+                 throw new Error("Este código de barras já foi cadastrado em outro produto. Volte e verifique.")
+            }
+            throw erroProd
+        }
+        
+        produtoId = novoProduto.id;
+      }
+
+      // CRIA O LOTE DE ESTOQUE - Fila Elegante
+      // Verifica se já existe um lote ativo para esse produto
+      const { data: loteAtivo } = await supabase.from('estoque_lotes')
+        .select('id').eq('produto_id', produtoId).eq('status', 'ativo').limit(1)
+
+      const statusDoLote = loteAtivo && loteAtivo.length > 0 ? 'espera' : 'ativo';
+
+      const { error: erroLote } = await supabase.from('estoque_lotes').insert([{
+        produto_id: produtoId,
+        quantidade_inicial: parseInt(dados.estoque) || 0,
+        quantidade_atual: parseInt(dados.estoque) || 0,
+        preco_custo: parseFloat(dados.precoCusto) || 0,
+        status: statusDoLote
       }])
-      if (error) throw error
+
+      if (erroLote) throw erroLote
+
       setSucesso(true)
     } catch (error) {
       alert('Erro ao cadastrar: ' + error.message)
@@ -183,6 +246,7 @@ export default function CadastroProduto() {
   const reiniciarFormulario = () => {
     setDados({ setorId: '', setorNome: '', marcaId: '', marcaNome: '',
       tipo: '', nome: '', precoCusto: '', precoVenda: '', estoque: '', codigoBarras: '' })
+    setProdutoExistente(null)
     setSucesso(false)
     setEtapa(1)
   }
@@ -203,10 +267,12 @@ export default function CadastroProduto() {
             </div>
           </div>
           <h2 className="font-bold text-[#1D1D1F] text-2xl mb-2" style={{ letterSpacing: '-0.02em' }}>
-            Produto salvo!
+            {produtoExistente ? 'Lote adicionado!' : 'Produto salvo!'}
           </h2>
           <p className="text-[#86868B] text-sm mb-10">
-            O produto foi cadastrado com sucesso no sistema.
+            {produtoExistente 
+              ? 'Uma nova remessa foi adicionada à fila de estoque deste produto.' 
+              : 'O produto foi cadastrado com sucesso no sistema.'}
           </p>
           <div className="flex flex-col gap-3">
             <PrimaryButton onClick={reiniciarFormulario} icon={null}>
@@ -242,10 +308,21 @@ export default function CadastroProduto() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.25, 0.46, 0.45, 0.94] }}
-        className="w-full max-w-sm bg-white rounded-3xl px-7 pt-8 pb-7"
+        className="w-full max-w-sm bg-white rounded-3xl px-7 pt-8 pb-7 relative overflow-hidden"
         style={{ boxShadow: '0 4px 40px rgba(0,0,0,0.08)' }}
       >
-        <StepDots etapa={etapa} total={TOTAL_ETAPAS} />
+        
+        {/* Aviso sutil na Etapa 4 se o produto existir */}
+        {etapa === 4 && produtoExistente && (
+            <div className="absolute top-0 left-0 right-0 bg-blue-500 text-white text-[11px] font-bold uppercase tracking-wider py-1.5 text-center flex justify-center items-center gap-1.5 z-10">
+                <AlertCircle size={12} />
+                Lote novo para produto existente
+            </div>
+        )}
+
+        <div className={etapa === 4 && produtoExistente ? 'mt-4' : ''}>
+           <StepDots etapa={etapa} total={TOTAL_ETAPAS} />
+        </div>
 
         <div className="overflow-hidden">
           <AnimatePresence mode="wait" custom={slideDirection}>
@@ -324,21 +401,31 @@ export default function CadastroProduto() {
               >
                 <StepLabel>Informações do Produto</StepLabel>
 
-                {/* AJUSTE 1 + 2: inputs com contraste real e preços empilhados com labels externas */}
                 <div className="flex flex-col gap-4">
+
+                  {dados.tipo === 'solo' && (
+                    <StyledInput
+                      icon={Barcode}
+                      label="Código de Barras (Bipe 1º)"
+                      placeholder="Bipe com o leitor..."
+                      value={dados.codigoBarras}
+                      onChange={handleCodigoBarrasChange}
+                      inputMode="numeric"
+                    />
+                  )}
 
                   <StyledInput
                     icon={FileText}
                     label="Nome do Produto / Kit"
                     placeholder="Ex: Perfume Importado 100ml"
                     value={dados.nome}
+                    disabled={!!produtoExistente}
                     onChange={e => setDados({ ...dados, nome: e.target.value })}
                   />
 
-                  {/* AJUSTE 2: coluna única no mobile, label acima do campo */}
                   <StyledInput
                     icon={DollarSign}
-                    label="Preço de Compra (custo)"
+                    label="Preço de Compra (Lote Atual)"
                     type="number"
                     placeholder="0,00"
                     inputMode="decimal"
@@ -348,7 +435,7 @@ export default function CadastroProduto() {
 
                   <StyledInput
                     icon={Tag}
-                    label="Preço de Venda"
+                    label="Preço de Venda (Universal)"
                     type="number"
                     placeholder="0,00"
                     inputMode="decimal"
@@ -356,20 +443,9 @@ export default function CadastroProduto() {
                     onChange={e => setDados({ ...dados, precoVenda: e.target.value })}
                   />
 
-                  {dados.tipo === 'solo' && (
-                    <StyledInput
-                      icon={Barcode}
-                      label="Código de Barras"
-                      placeholder="Digite ou bipe o código"
-                      value={dados.codigoBarras}
-                      onChange={e => setDados({ ...dados, codigoBarras: e.target.value })}
-                      inputMode="numeric"
-                    />
-                  )}
-
                   <StyledInput
                     icon={Hash}
-                    label="Estoque Inicial"
+                    label="Quantidade (Qtd Entrando)"
                     type="number"
                     placeholder="0"
                     inputMode="numeric"
@@ -383,7 +459,7 @@ export default function CadastroProduto() {
                       disabled={carregando}
                       icon={carregando ? null : CheckCircle}
                     >
-                      {carregando ? 'Salvando…' : 'Finalizar Cadastro'}
+                      {carregando ? 'Salvando…' : (produtoExistente ? 'Salvar Novo Lote' : 'Finalizar Cadastro')}
                     </PrimaryButton>
                   </div>
                 </div>
