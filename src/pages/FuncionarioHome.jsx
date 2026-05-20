@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Lock, Unlock, LogOut, ShieldAlert, ArrowRight } from 'lucide-react'
+import { Lock, Unlock, LogOut, ShieldAlert, ArrowRight, Printer } from 'lucide-react'
+import ThermalPrinterEncoder from 'thermal-printer-encoder'
 
 export default function FuncionarioHome() {
   const navigate = useNavigate()
@@ -12,7 +13,11 @@ export default function FuncionarioHome() {
   const [usuario, setUsuario] = useState(null)
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
   const [sessoesAdmin, setSessoesAdmin] = useState([])
+  
+  // Estado do Fechamento e Impressora
   const [resumoFechamento, setResumoFechamento] = useState(null)
+  const [printerStatus, setPrinterStatus] = useState('Imprimir Relatório')
+  const printerCharRef = useRef(null)
 
   // Limpa o localStorage preventivamente ao montar a tela
   useEffect(() => {
@@ -120,16 +125,20 @@ export default function FuncionarioHome() {
       const totalCartao = vendasProcessadas.filter(v => ['credito', 'debito'].includes(v.metodo_pagamento)).reduce((acc, v) => acc + Number(v.total), 0)
       const totalGeral = totalDinheiro + totalPix + totalCartao
 
+      const dataFechamento = new Date().toISOString()
+
       // Atualiza o banco
       await supabase
         .from('caixa_sessoes')
-        .update({ status: 'fechado', fechado_em: new Date().toISOString() })
+        .update({ status: 'fechado', fechado_em: dataFechamento })
         .eq('id', sessaoParaFechar.id)
 
       // Exibe resumo apenas para o funcionário que fechou o próprio caixa
       if (usuario.cargo !== 'admin') {
         setResumoFechamento({
           operador: sessaoParaFechar.operador,
+          aberto_em: sessaoParaFechar.aberto_em,
+          fechado_em: dataFechamento,
           dinheiro: totalDinheiro, pix: totalPix, cartao: totalCartao, geral: totalGeral, qtdVendas: vendasProcessadas.length
         })
         localStorage.removeItem('volte_sessao_caixa')
@@ -148,10 +157,113 @@ export default function FuncionarioHome() {
   }
 
   // ==========================================
+  // 4. IMPRIMIR RECIBO VIA BLUETOOTH
+  // ==========================================
+  const imprimirFechamento = async () => {
+    if (!resumoFechamento) return;
+
+    try {
+      let targetChar = printerCharRef.current;
+
+      // 1. Conecta no Bluetooth (Caso não esteja conectado ainda)
+      if (!targetChar) {
+        setPrinterStatus('Conectando...');
+        if (!navigator.bluetooth) throw new Error("Bluetooth não suportado neste navegador.");
+
+        const selectedDevice = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true, 
+          optionalServices: [
+            '00001101-0000-1000-8000-00805f9b34fb', 
+            '000018f0-0000-1000-8000-00805f9b34fb', 
+            '49535343-fe7d-4ae5-8fa9-9fafd205e455'  
+          ]
+        });
+
+        const server = await selectedDevice.gatt.connect();
+        const servicesToTry = [
+          '00001101-0000-1000-8000-00805f9b34fb',
+          '000018f0-0000-1000-8000-00805f9b34fb',
+          '49535343-fe7d-4ae5-8fa9-9fafd205e455'
+        ];
+
+        for (let uuid of servicesToTry) {
+          try {
+            const service = await server.getPrimaryService(uuid);
+            const characteristics = await service.getCharacteristics();
+            const char = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
+            if (char) { targetChar = char; break; }
+          } catch (err) { /* Tenta o próximo */ }
+        }
+
+        if (!targetChar) throw new Error("Serviço de impressão não encontrado no aparelho.");
+        printerCharRef.current = targetChar;
+      }
+
+      setPrinterStatus('Imprimindo...');
+
+      // 2. Monta o layout do Ticket
+      const encoder = new ThermalPrinterEncoder({ language: 'esc-pos', width: 32 });
+      
+      const dados = encoder
+        .initialize()
+        .align('center')
+        .bold(true)
+        .line('VOLTE PERFUMARIA')
+        .bold(false)
+        .line('--------------------------------')
+        .line('FECHAMENTO DE CAIXA')
+        .line('--------------------------------')
+        .align('left')
+        .line(`OPERADOR: ${resumoFechamento.operador}`)
+        .line(`ABERTURA: ${new Date(resumoFechamento.aberto_em).toLocaleString('pt-BR').slice(0,16)}`)
+        .line(`FECHAMENTO: ${new Date(resumoFechamento.fechado_em).toLocaleString('pt-BR').slice(0,16)}`)
+        .line('--------------------------------')
+        .line(`QTD DE VENDAS: ${resumoFechamento.qtdVendas}`)
+        .newline()
+        .line(`DINHEIRO: R$ ${resumoFechamento.dinheiro.toFixed(2)}`)
+        .line(`PIX:      R$ ${resumoFechamento.pix.toFixed(2)}`)
+        .line(`CARTOES:  R$ ${resumoFechamento.cartao.toFixed(2)}`)
+        .line('--------------------------------')
+        .align('center')
+        .bold(true)
+        .line(`TOTAL GERAL: R$ ${resumoFechamento.geral.toFixed(2)}`)
+        .bold(false)
+        .newline()
+        .newline()
+        .line('Assinatura do Operador:')
+        .newline()
+        .newline()
+        .line('________________________________')
+        .line(resumoFechamento.operador)
+        .newline()
+        .newline()
+        .newline()
+        .newline()
+        .encode();
+
+      // 3. Envia fatiado (Chunking para evitar engasgo do Bluetooth mobile)
+      const chunkSize = 100;
+      for (let i = 0; i < dados.length; i += chunkSize) {
+        const pedaco = dados.slice(i, i + chunkSize);
+        await targetChar.writeValue(pedaco);
+      }
+
+      setPrinterStatus('Imprimir Novamente');
+
+    } catch (error) {
+      console.error(error);
+      alert("Falha: " + error.message);
+      setPrinterStatus('Tentar Novamente');
+      printerCharRef.current = null; // Reseta a porta se deu erro
+    }
+  }
+
+
+  // ==========================================
   // RENDERIZAÇÃO CONDICIONAL
   // ==========================================
   
-  // TELA 1: FECHAMENTO CONCLUÍDO
+  // TELA 1: FECHAMENTO CONCLUÍDO (AGORA COM BOTÃO DE IMPRIMIR)
   if (resumoFechamento) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center p-4">
@@ -187,12 +299,21 @@ export default function FuncionarioHome() {
             </div>
           </div>
 
-          <button 
-            onClick={() => { setResumoFechamento(null); setUsuario(null); }}
-            className="w-full bg-[#1D1D1F] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
-          >
-            Voltar ao Início
-          </button>
+          <div className="flex flex-col gap-3">
+            <button 
+              onClick={imprimirFechamento}
+              className="w-full bg-blue-100 text-blue-700 font-bold py-4 rounded-xl hover:bg-blue-200 transition-colors flex items-center justify-center gap-2"
+            >
+              <Printer size={20} /> {printerStatus}
+            </button>
+
+            <button 
+              onClick={() => { setResumoFechamento(null); setUsuario(null); }}
+              className="w-full bg-[#1D1D1F] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
+            >
+              Finalizar e Sair
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -305,6 +426,7 @@ export default function FuncionarioHome() {
             <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             <input 
               type="password" 
+              inputMode="numeric"
               placeholder="Ex: 1111" 
               value={pin}
               onChange={(e) => setPin(e.target.value)}
