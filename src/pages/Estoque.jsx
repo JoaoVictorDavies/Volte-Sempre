@@ -1,6 +1,90 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
+import { ChevronDown, ChevronUp, Calendar, DollarSign, Package } from 'lucide-react'
+
+// Mini-componente para gerenciar a "gaveta" de lotes de cada produto
+function ProdutoItem({ produto }) {
+  const [expandido, setExpandido] = useState(false)
+  const temLotes = produto.lotesValidos && produto.lotesValidos.length > 0
+
+  return (
+    <div className="flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden mb-3 shadow-sm transition-all hover:shadow-md">
+      {/* LINHA PRINCIPAL DO PRODUTO (Clicável) */}
+      <div 
+        onClick={() => setExpandido(!expandido)}
+        className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-start gap-3">
+          <div className="mt-1 text-gray-400">
+            {expandido ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+          </div>
+          <div>
+            <span className="font-bold text-gray-800 text-lg">{produto.nome}</span>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className="text-xs font-mono bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md">
+                Cód: {produto.codigo_barras || 'Sem código'}
+              </span>
+              <span className="text-xs text-gray-400">
+                {produto.lotesValidos.length} {produto.lotesValidos.length > 1 ? 'lotes ativos' : 'lote ativo'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-6">
+          <div className="text-right hidden sm:block">
+            <p className="text-xs text-gray-400 uppercase tracking-wider font-bold">Preço de Venda</p>
+            <p className="font-bold text-green-600">R$ {Number(produto.preco_venda).toFixed(2)}</p>
+          </div>
+          <div className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-lg min-w-[50px] text-center shadow-sm">
+            {produto.estoqueReal}
+          </div>
+        </div>
+      </div>
+
+      {/* GAVETA DE LOTES (Expansível) */}
+      {expandido && (
+        <div className="bg-[#F9F9FB] border-t border-gray-100 p-4">
+          <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <Package size={14} /> Detalhamento de Lotes (Fila)
+          </h4>
+          
+          <div className="space-y-2">
+            {produto.lotesValidos.map((lote, index) => (
+              <div key={lote.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                
+                <div className="flex items-center gap-4">
+                  <div className={`w-2 h-8 rounded-full ${lote.status === 'ativo' ? 'bg-green-400' : 'bg-orange-400'}`} title={`Status: ${lote.status}`}></div>
+                  <div>
+                    <p className="text-sm font-bold text-gray-700">Lote {index + 1} <span className="text-xs font-normal text-gray-400 ml-1">({lote.status})</span></p>
+                    <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                      <Calendar size={12} /> {new Date(lote.criado_em).toLocaleDateString('pt-BR')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6">
+                  <div className="text-right">
+                    <p className="text-xs text-gray-400">Custo Un.</p>
+                    <p className="text-sm font-bold text-red-500 flex items-center gap-1">
+                      <DollarSign size={12} /> {Number(lote.preco_custo).toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="text-center bg-gray-100 px-3 py-1 rounded-md">
+                    <p className="text-xs text-gray-400">Restam</p>
+                    <p className="text-sm font-bold text-gray-800">{lote.quantidade_atual} un.</p>
+                  </div>
+                </div>
+
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function Estoque() {
   const navigate = useNavigate()
@@ -11,33 +95,57 @@ export default function Estoque() {
     async function carregarEstoque() {
       setCarregando(true)
       try {
-        // 1. Puxamos tudo do banco
-        const { data: setores } = await supabase.from('setores').select('*').order('nome')
-        const { data: marcas } = await supabase.from('marcas').select('*').order('nome')
-        const { data: produtos } = await supabase.from('produtos')
-          .select('*')
-          .gt('estoque', 0) // REGRA: Só traz o que tem estoque maior que zero
-          .order('nome')
+        // 1. Puxamos tudo do banco simultaneamente
+        // Usamos o Supabase para já trazer os lotes atrelados aos produtos
+        const [resSetores, resMarcas, resProdutos] = await Promise.all([
+          supabase.from('setores').select('*').order('nome'),
+          supabase.from('marcas').select('*').order('nome'),
+          supabase.from('produtos').select('*, estoque_lotes(*)').order('nome')
+        ])
 
-        // 2. Organizamos a hierarquia: Setor -> Marca -> Produtos
+        if (resSetores.error) throw resSetores.error
+        if (resMarcas.error) throw resMarcas.error
+        if (resProdutos.error) throw resProdutos.error
+
+        // 2. Processamento e Limpeza (Filtra o que tá zerado)
         const estrutura = {}
 
-        setores.forEach(setor => {
-          estrutura[setor.nome] = {}
+        resSetores.data.forEach(setor => {
+          const dictMarcas = {}
           
-          const marcasDoSetor = marcas.filter(m => m.setor_id === setor.id)
+          const marcasDoSetor = resMarcas.data.filter(m => m.setor_id === setor.id)
           marcasDoSetor.forEach(marca => {
-            const produtosDaMarca = produtos.filter(p => p.marca_id === marca.id)
             
-            // Só adiciona a marca se ela tiver produtos com estoque
-            if (produtosDaMarca.length > 0) {
-              estrutura[setor.nome][marca.nome] = produtosDaMarca
+            // Pega os produtos desta marca
+            const produtosDaMarca = resProdutos.data.filter(p => p.marca_id === marca.id)
+            
+            // Calcula o estoque real baseado apenas nos lotes
+            const produtosValidos = produtosDaMarca.map(p => {
+              // Só pega lotes que têm quantidade > 0
+              const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
+              
+              // Ordena os lotes: os 'ativos' primeiro, depois por data de criação (mais antigos primeiro = PEPS)
+              lotesValidos.sort((a, b) => {
+                if (a.status === 'ativo' && b.status !== 'ativo') return -1;
+                if (a.status !== 'ativo' && b.status === 'ativo') return 1;
+                return new Date(a.criado_em) - new Date(b.criado_em);
+              });
+
+              // Soma o total que tem nesses lotes
+              const estoqueReal = lotesValidos.reduce((acc, lote) => acc + lote.quantidade_atual, 0)
+              
+              return { ...p, lotesValidos, estoqueReal }
+            }).filter(p => p.estoqueReal > 0) // REGRA: Remove o produto se o estoque real for 0
+
+            // Só adiciona a marca se sobrar algum produto nela
+            if (produtosValidos.length > 0) {
+              dictMarcas[marca.nome] = produtosValidos
             }
           })
 
-          // Se o setor não tiver nenhuma marca com produto, removemos o setor da visualização
-          if (Object.keys(estrutura[setor.nome]).length === 0) {
-            delete estrutura[setor.nome]
+          // Se sobrou alguma marca com produto, adiciona o setor na tela
+          if (Object.keys(dictMarcas).length > 0) {
+            estrutura[setor.nome] = dictMarcas
           }
         })
 
@@ -53,51 +161,49 @@ export default function Estoque() {
   }, [])
 
   return (
-    <div className="max-w-5xl mx-auto p-4 md:p-8">
+    <div className="max-w-5xl mx-auto p-4 md:p-8 animate-in fade-in duration-300">
       <header className="mb-8 flex justify-between items-center">
         <div>
-          <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-2">← Voltar</button>
-          <h1 className="text-3xl font-bold text-gray-800">Meus Itens em Estoque</h1>
+          <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-2 flex items-center gap-1 hover:underline focus:outline-none">
+            ← Voltar ao Painel
+          </button>
+          <h1 className="text-3xl font-bold text-gray-800" style={{ letterSpacing: '-0.02em' }}>
+            Visão de Estoque
+          </h1>
+          <p className="text-[#86868B] mt-1 text-sm">Controle detalhado de remessas e capital.</p>
         </div>
       </header>
 
       {carregando ? (
-        <div className="text-center py-10 text-gray-500 font-bold">Sincronizando com o banco...</div>
+        <div className="text-center py-20 text-gray-500 font-bold animate-pulse">Sincronizando com o banco de dados...</div>
       ) : Object.keys(dadosAgrupados).length === 0 ? (
-        <div className="text-center py-10 bg-white rounded-2xl border-2 border-dashed">
-          <p className="text-gray-400">Nenhum produto com estoque disponível.</p>
+        <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-gray-200">
+          <div className="text-4xl mb-3 opacity-50">📦</div>
+          <p className="text-gray-500 font-medium">Nenhum produto com estoque disponível.</p>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {Object.entries(dadosAgrupados).map(([setorNome, marcas]) => (
-            <div key={setorNome} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div key={setorNome} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+              
               {/* CABEÇALHO DO SETOR */}
-              <div className="bg-gray-800 p-4">
-                <h2 className="text-white font-bold text-xl uppercase tracking-wider">{setorNome}</h2>
+              <div className="bg-[#1D1D1F] p-5">
+                <h2 className="text-white font-bold text-xl uppercase tracking-widest">{setorNome}</h2>
               </div>
 
-              <div className="p-4 space-y-6">
+              <div className="p-5 md:p-8 space-y-8">
                 {Object.entries(marcas).map(([marcaNome, produtos]) => (
-                  <div key={marcaNome} className="border-l-4 border-blue-500 pl-4">
-                    <h3 className="text-blue-600 font-bold text-lg mb-3">{marcaNome}</h3>
+                  <div key={marcaNome} className="relative">
                     
-                    <div className="grid grid-cols-1 gap-2">
+                    {/* INDICADOR DE MARCA */}
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-1.5 h-6 bg-blue-500 rounded-full"></div>
+                      <h3 className="text-blue-600 font-bold text-xl tracking-tight">{marcaNome}</h3>
+                    </div>
+                    
+                    <div className="pl-0 md:pl-4">
                       {produtos.map(p => (
-                        <div key={p.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100">
-                          <div>
-                            <span className="font-bold text-gray-700">{p.nome}</span>
-                            <p className="text-xs text-gray-400">Cód: {p.codigo_barras || 'N/A'}</p>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="text-right">
-                              <p className="text-xs text-gray-400">Preço Venda</p>
-                              <p className="font-bold text-green-600">R$ {Number(p.preco_venda).toFixed(2)}</p>
-                            </div>
-                            <div className="bg-blue-600 text-white px-3 py-1 rounded-md font-bold text-sm min-w-[40px] text-center">
-                              {p.estoque}
-                            </div>
-                          </div>
-                        </div>
+                        <ProdutoItem key={p.id} produto={p} />
                       ))}
                     </div>
                   </div>
