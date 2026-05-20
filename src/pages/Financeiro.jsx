@@ -1,264 +1,333 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-
-// Ícones SVG Simples
-const PlusIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14m-7-7h14"/></svg>
-const MinusIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/></svg>
+import { motion, AnimatePresence } from 'framer-motion'
+import { ArrowLeft, Wallet, Lock, Unlock, Clock, Calendar, TrendingUp, X, Receipt, ShoppingBag } from 'lucide-react'
 
 export default function Financeiro() {
   const navigate = useNavigate()
   
+  const [caixas, setCaixas] = useState({ abertos: [], fechados: [] })
   const [carregando, setCarregando] = useState(true)
-  const [turnos, setTurnos] = useState([])
-  const [vendas, setVendas] = useState([])
-  const [estoqueFinanceiro, setEstoqueFinanceiro] = useState([])
   
-  // Controle de qual venda está expandida (para ver os itens)
-  const [vendaExpandida, setVendaExpandida] = useState(null)
+  // Estados do Modal "Raio-X do Caixa"
+  const [caixaSelecionado, setCaixaSelecionado] = useState(null)
+  const [detalhesCaixa, setDetalhesCaixa] = useState(null)
+  const [carregandoDetalhes, setCarregandoDetalhes] = useState(false)
 
+  // ==========================================
+  // 1. CARREGAR TODOS OS CAIXAS
+  // ==========================================
   useEffect(() => {
-    async function carregarDadosFinanceiros() {
-      setCarregando(true)
-      try {
-        // 1. BUSCAR ÚLTIMOS TURNOS/CAIXAS (Últimos 10 para não pesar a tela)
-        const { data: caixas } = await supabase
-          .from('caixa_sessoes')
-          .select('*')
-          .order('aberto_em', { ascending: false })
-          .limit(10)
-
-        // 2. BUSCAR VENDAS DESSES TURNOS (Com os itens que saíram)
-        const caixaIds = caixas?.map(c => c.id) || []
-        let vendasData = []
-        if (caixaIds.length > 0) {
-          const { data } = await supabase
-            .from('vendas')
-            .select('*, vendas_itens(*)')
-            .in('sessao_id', caixaIds)
-            .order('criado_em', { ascending: false })
-          vendasData = data || []
-        }
-
-        // 3. BUSCAR DADOS PARA O VALUATION DO ESTOQUE
-        const [resProd, resMarcas, resSetores] = await Promise.all([
-          supabase.from('produtos').select('estoque, preco_custo, preco_venda, marca_id').gt('estoque', 0),
-          supabase.from('marcas').select('id, setor_id'),
-          supabase.from('setores').select('id, nome')
-        ])
-
-        // 4. PROCESSAR VALUATION POR SETOR
-        const valuation = []
-        if (!resSetores.error && !resMarcas.error && !resProd.error) {
-          resSetores.data.forEach(setor => {
-            // Acha as marcas desse setor
-            const marcasDoSetor = resMarcas.data.filter(m => m.setor_id === setor.id).map(m => m.id)
-            // Acha os produtos dessas marcas
-            const produtosDoSetor = resProd.data.filter(p => marcasDoSetor.includes(p.marca_id))
-            
-            if (produtosDoSetor.length > 0) {
-              const custo = produtosDoSetor.reduce((acc, p) => acc + (p.preco_custo * p.estoque), 0)
-              const venda = produtosDoSetor.reduce((acc, p) => acc + (p.preco_venda * p.estoque), 0)
-              const lucro = venda - custo
-
-              valuation.push({
-                setor: setor.nome,
-                custoTotal: custo,
-                lucroProjetado: lucro
-              })
-            }
-          })
-        }
-
-        setEstoqueFinanceiro(valuation)
-        setTurnos(caixas || [])
-        setVendas(vendasData)
-
-      } catch (error) {
-        console.error("Erro ao carregar financeiro:", error)
-      } finally {
-        setCarregando(false)
-      }
-    }
-
-    carregarDadosFinanceiros()
+    carregarCaixas()
   }, [])
 
-  // Funções Auxiliares de Formatação
-  const formatarDataHora = (isoString) => {
-    if (!isoString) return 'Agora'
-    const date = new Date(isoString)
-    return `${date.toLocaleDateString('pt-BR')} às ${date.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}`
+  const carregarCaixas = async () => {
+    setCarregando(true)
+    try {
+      const { data, error } = await supabase
+        .from('caixa_sessoes')
+        .select('*')
+        .order('aberto_em', { ascending: false })
+
+      if (error) throw error
+
+      const abertos = data.filter(c => c.status === 'aberto')
+      const fechados = data.filter(c => c.status === 'fechado')
+
+      setCaixas({ abertos, fechados })
+    } catch (error) {
+      console.error("Erro ao carregar caixas:", error)
+    } finally {
+      setCarregando(false)
+    }
   }
 
-  const toggleExpandir = (vendaId) => {
-    if (vendaExpandida === vendaId) setVendaExpandida(null)
-    else setVendaExpandida(vendaId)
+  // ==========================================
+  // 2. ABRIR CAIXINHA (BUSCAR EXTRATO)
+  // ==========================================
+  const abrirDetalhes = async (caixa) => {
+    setCaixaSelecionado(caixa)
+    setCarregandoDetalhes(true)
+    
+    try {
+      // Puxa as vendas E os itens vendidos nessas vendas de uma vez só!
+      const { data: vendas, error } = await supabase
+        .from('vendas')
+        .select('*, vendas_itens(*)')
+        .eq('sessao_id', caixa.id)
+        .order('criado_em', { ascending: false })
+
+      if (error) throw error
+
+      // Matemática Financeira
+      let totalDinheiro = 0, totalPix = 0, totalCartao = 0
+      let faturamentoTotal = 0, custoTotal = 0
+
+      const vendasProcessadas = vendas || []
+
+      vendasProcessadas.forEach(venda => {
+        faturamentoTotal += Number(venda.total)
+        
+        if (venda.metodo_pagamento === 'dinheiro') totalDinheiro += Number(venda.total)
+        else if (venda.metodo_pagamento === 'pix') totalPix += Number(venda.total)
+        else totalCartao += Number(venda.total)
+
+        // Soma o custo das mercadorias vendidas
+        venda.vendas_itens.forEach(item => {
+          custoTotal += (Number(item.preco_custo) * item.quantidade)
+        })
+      })
+
+      const lucroBruto = faturamentoTotal - custoTotal
+
+      setDetalhesCaixa({
+        vendas: vendasProcessadas,
+        resumo: { faturamentoTotal, custoTotal, lucroBruto, totalDinheiro, totalPix, totalCartao, qtdVendas: vendasProcessadas.length }
+      })
+
+    } catch (error) {
+      alert("Erro ao buscar detalhes do caixa: " + error.message)
+    } finally {
+      setCarregandoDetalhes(false)
+    }
+  }
+
+  const formatarData = (dataIso) => {
+    if (!dataIso) return '--/--/----'
+    return new Date(dataIso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  // ==========================================
+  // COMPONENTES MENORES (UI)
+  // ==========================================
+  const CaixaCard = ({ caixa, tipo }) => {
+    const isAberto = tipo === 'aberto'
+    return (
+      <motion.button 
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={() => abrirDetalhes(caixa)}
+        className="w-full bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all text-left flex flex-col justify-between"
+      >
+        <div className="flex justify-between items-start mb-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isAberto ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
+              {isAberto ? <Unlock size={24} /> : <Lock size={24} />}
+            </div>
+            <div>
+              <h3 className="font-bold text-[#1D1D1F] text-lg leading-tight">{caixa.operador}</h3>
+              <p className="text-xs text-[#86868B] flex items-center gap-1 mt-0.5">
+                <Calendar size={12} /> {formatarData(caixa.aberto_em)}
+              </p>
+            </div>
+          </div>
+          {isAberto && (
+            <span className="flex items-center gap-1.5 text-xs font-bold text-green-700 bg-green-50 px-3 py-1 rounded-full">
+              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Ativo
+            </span>
+          )}
+        </div>
+        
+        <div className="bg-[#F5F5F7] p-3 rounded-xl flex items-center justify-between text-sm">
+          <span className="text-[#86868B] font-medium flex items-center gap-1">
+            <Clock size={14} /> Fechamento
+          </span>
+          <span className="font-bold text-[#1D1D1F]">
+            {isAberto ? 'Em andamento...' : formatarData(caixa.fechado_em)}
+          </span>
+        </div>
+      </motion.button>
+    )
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-4 md:p-8 animate-in fade-in">
-      
-      <header className="mb-8">
-        <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-2">← Voltar ao Painel</button>
-        <h1 className="text-3xl font-bold text-gray-800">Visão Financeira</h1>
-        <p className="text-gray-500">Gestão de capital em estoque e fechamento de turnos.</p>
-      </header>
+    <div className="min-h-screen bg-[#F5F5F7] p-4 md:p-8 animate-in fade-in duration-300 relative">
+      <div className="max-w-5xl mx-auto">
+        
+        {/* CABEÇALHO */}
+        <header className="mb-10">
+          <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline focus:outline-none">
+            <ArrowLeft size={16} /> Voltar ao Painel
+          </button>
+          <h1 className="text-3xl font-bold text-[#1D1D1F]" style={{ letterSpacing: '-0.02em' }}>
+            Extrato de Caixas
+          </h1>
+          <p className="text-[#86868B] mt-1 text-sm">Acompanhe as sessões de venda da sua loja.</p>
+        </header>
 
-      {carregando ? (
-        <div className="text-center py-20 text-gray-500 font-bold">Calculando valores...</div>
-      ) : (
-        <div className="space-y-10">
-          
-          {/* ==========================================
-              SESSÃO 1: VALUATION DO ESTOQUE
-              ========================================== */}
-          <section>
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-              📦 Capital no Estoque
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {estoqueFinanceiro.map((val, idx) => (
-                <div key={idx} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between">
-                  <h3 className="font-bold text-gray-700 uppercase tracking-wide text-sm mb-4">{val.setor}</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-end border-b border-gray-50 pb-2">
-                      <span className="text-gray-500 text-sm">Custo Pago</span>
-                      <span className="font-bold text-gray-800">R$ {val.custoTotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between items-end pt-1">
-                      <span className="text-gray-500 text-sm">Lucro ao Vender</span>
-                      <span className="font-bold text-blue-600 text-lg">R$ {val.lucroProjetado.toFixed(2)}</span>
-                    </div>
-                  </div>
+        {carregando ? (
+          <div className="text-center py-20 text-gray-500 font-bold animate-pulse">Buscando histórico financeiro...</div>
+        ) : (
+          <div className="space-y-10">
+            
+            {/* SEÇÃO 1: CAIXAS ABERTOS */}
+            <section>
+              <h2 className="text-sm font-bold text-[#86868B] uppercase tracking-widest mb-4 flex items-center gap-2">
+                <Unlock size={16} /> Caixas Operando Agora
+              </h2>
+              {caixas.abertos.length === 0 ? (
+                <div className="bg-white/50 border border-dashed border-gray-300 rounded-2xl p-6 text-center text-gray-500 text-sm">
+                  Nenhum caixa aberto neste momento.
                 </div>
-              ))}
-              {estoqueFinanceiro.length === 0 && (
-                <p className="text-gray-400 p-4 border-2 border-dashed rounded-xl col-span-3">Nenhum produto com estoque e valor cadastrado.</p>
-              )}
-            </div>
-          </section>
-
-          {/* ==========================================
-              SESSÃO 2: RESUMO DOS TURNOS (CAIXAS)
-              ========================================== */}
-          <section>
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-              🔒 Fechamento de Caixas (Turnos)
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {turnos.map(turno => {
-                // Filtra as vendas apenas deste turno
-                const vendasDoTurno = vendas.filter(v => v.sessao_id === turno.id)
-                const total = vendasDoTurno.reduce((acc, v) => acc + Number(v.total), 0)
-                
-                return (
-                  <div key={turno.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
-                    {/* Barra indicadora de status */}
-                    <div className={`absolute left-0 top-0 bottom-0 w-2 ${turno.status === 'aberto' ? 'bg-green-400' : 'bg-gray-300'}`}></div>
-                    
-                    <div className="pl-4">
-                      <h3 className="text-lg font-bold text-gray-800 mb-1">
-                        Caixa da {turno.operador} {turno.status === 'aberto' && <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full ml-2 align-middle">Em andamento</span>}
-                      </h3>
-                      <p className="text-sm text-gray-500 mb-4">
-                        Aberto dia {formatarDataHora(turno.aberto_em)}
-                        <br/>
-                        Fechado {turno.status === 'aberto' ? 'ainda não' : formatarDataHora(turno.fechado_em)}
-                      </p>
-
-                      <div className="flex items-center justify-between bg-gray-50 p-3 rounded-xl border border-gray-100">
-                        <span className="text-gray-600 font-medium">Total vendido:</span>
-                        <span className="text-2xl font-bold text-green-600">R$ {total.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-              {turnos.length === 0 && <p className="text-gray-400 col-span-2">Nenhum turno registrado recentemente.</p>}
-            </div>
-          </section>
-
-          {/* ==========================================
-              SESSÃO 3: EXTRATO DE VENDAS
-              ========================================== */}
-          <section>
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-              🧾 Extrato Detalhado
-            </h2>
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              {vendas.length === 0 ? (
-                <p className="p-8 text-center text-gray-500">Nenhuma venda nas sessões recentes.</p>
               ) : (
-                <div className="divide-y divide-gray-100">
-                  {vendas.map(venda => {
-                    // Encontra quem era o operador
-                    const turnoDaVenda = turnos.find(t => t.id === venda.sessao_id)
-                    const nomeOperador = turnoDaVenda ? turnoDaVenda.operador : 'Desconhecido'
-                    
-                    // Formata a tag de pagamento
-                    const isPix = venda.metodo_pagamento === 'pix'
-                    const isDin = venda.metodo_pagamento === 'dinheiro'
-                    
-                    return (
-                      <div key={venda.id} className="flex flex-col">
-                        {/* CABEÇALHO DA VENDA (LINHA CLICÁVEL) */}
-                        <div 
-                          onClick={() => toggleExpandir(venda.id)}
-                          className="flex justify-between items-center p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-                        >
-                          <div className="flex items-center gap-4">
-                            <button className="text-gray-400 hover:text-blue-600 bg-gray-100 p-1.5 rounded-lg">
-                              {vendaExpandida === venda.id ? <MinusIcon /> : <PlusIcon />}
-                            </button>
-                            <div>
-                              <p className="font-bold text-gray-800">R$ {Number(venda.total).toFixed(2)}</p>
-                              <p className="text-xs text-gray-500">
-                                Por {nomeOperador} · {new Date(venda.criado_em).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                            <span className={`text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wider ${isPix ? 'bg-purple-100 text-purple-700' : isDin ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                              {venda.metodo_pagamento}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* ITENS DA VENDA (EXPANSÍVEL) */}
-                        {vendaExpandida === venda.id && (
-                          <div className="bg-gray-50 p-4 pl-14 border-t border-dashed border-gray-200 animate-in slide-in-from-top-2">
-                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Itens da Sacola</h4>
-                            <ul className="space-y-2">
-                              {venda.vendas_itens && venda.vendas_itens.map(item => (
-                                <li key={item.id} className="flex justify-between text-sm">
-                                  <span className="text-gray-700">{item.quantidade}x {item.nome}</span>
-                                  <span className="font-medium text-gray-800">R$ {(item.quantidade * item.preco_venda).toFixed(2)}</span>
-                                </li>
-                              ))}
-                              {(!venda.vendas_itens || venda.vendas_itens.length === 0) && (
-                                <li className="text-sm text-gray-400 italic">Itens não registrados.</li>
-                              )}
-                            </ul>
-                            {isDin && Number(venda.troco) > 0 && (
-                              <div className="mt-3 pt-2 border-t border-gray-200 flex justify-between text-xs text-gray-500">
-                                <span>Valor Recebido: R$ {Number(venda.valor_recebido).toFixed(2)}</span>
-                                <span>Troco Devolvido: R$ {Number(venda.troco).toFixed(2)}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {caixas.abertos.map(caixa => (
+                    <CaixaCard key={caixa.id} caixa={caixa} tipo="aberto" />
+                  ))}
                 </div>
               )}
-            </div>
-          </section>
+            </section>
 
-        </div>
-      )}
+            {/* SEÇÃO 2: HISTÓRICO DE FECHADOS */}
+            <section>
+              <h2 className="text-sm font-bold text-[#86868B] uppercase tracking-widest mb-4 flex items-center gap-2">
+                <Lock size={16} /> Histórico (Fechados)
+              </h2>
+              {caixas.fechados.length === 0 ? (
+                <div className="bg-white/50 border border-dashed border-gray-300 rounded-2xl p-6 text-center text-gray-500 text-sm">
+                  Nenhum histórico de caixa fechado.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {caixas.fechados.map(caixa => (
+                    <CaixaCard key={caixa.id} caixa={caixa} tipo="fechado" />
+                  ))}
+                </div>
+              )}
+            </section>
+
+          </div>
+        )}
+      </div>
+
+      {/* ==========================================
+          MODAL: A CAIXINHA ABERTA (RAIO-X)
+          ========================================== */}
+      <AnimatePresence>
+        {caixaSelecionado && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            {/* Fundo escuro clicável para fechar */}
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setCaixaSelecionado(null)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+
+            {/* O Modal em si */}
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white w-full max-w-2xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+            >
+              
+              {/* Header do Raio-X */}
+              <header className="bg-gray-50 border-b border-gray-100 p-6 flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-bold text-[#1D1D1F]">Raio-X do Caixa</h2>
+                  <p className="text-sm text-[#86868B]">Operador: <span className="font-bold text-gray-700">{caixaSelecionado.operador}</span></p>
+                </div>
+                <button onClick={() => setCaixaSelecionado(null)} className="p-2 bg-white rounded-full border border-gray-200 hover:bg-gray-100 text-gray-500 transition-colors">
+                  <X size={20} />
+                </button>
+              </header>
+
+              <div className="flex-1 overflow-y-auto p-6 bg-white">
+                {carregandoDetalhes ? (
+                  <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                    <div className="animate-spin mb-4"><Wallet size={32} /></div>
+                    <p>Contando as moedas...</p>
+                  </div>
+                ) : detalhesCaixa && (
+                  <div className="space-y-8">
+                    
+                    {/* BLOCO DE RESUMO FINANCEIRO (DRE DO CAIXA) */}
+                    <div className="bg-[#1D1D1F] rounded-2xl p-6 text-white shadow-lg">
+                      <div className="flex items-center gap-2 text-gray-400 text-sm font-bold uppercase tracking-widest mb-4">
+                        <TrendingUp size={16} /> Resumo Financeiro
+                      </div>
+                      
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                        <div>
+                          <p className="text-gray-400 text-xs mb-1">Total Entradas</p>
+                          <p className="font-bold text-xl">R$ {detalhesCaixa.resumo.faturamentoTotal.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 text-xs mb-1">Custo Produtos</p>
+                          <p className="font-bold text-xl text-red-400">- R$ {detalhesCaixa.resumo.custoTotal.toFixed(2)}</p>
+                        </div>
+                        <div className="col-span-2 sm:col-span-2 bg-white/10 rounded-xl p-3 border border-white/10">
+                          <p className="text-gray-300 text-xs mb-1">Lucro Bruto Livre</p>
+                          <p className="font-bold text-2xl text-green-400">R$ {detalhesCaixa.resumo.lucroBruto.toFixed(2)}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-4 border-t border-white/10 text-center">
+                        <div className="bg-white/5 rounded-lg p-2">
+                          <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Dinheiro</p>
+                          <p className="font-bold text-sm">R$ {detalhesCaixa.resumo.totalDinheiro.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-white/5 rounded-lg p-2">
+                          <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Pix</p>
+                          <p className="font-bold text-sm">R$ {detalhesCaixa.resumo.totalPix.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-white/5 rounded-lg p-2">
+                          <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Cartões</p>
+                          <p className="font-bold text-sm">R$ {detalhesCaixa.resumo.totalCartao.toFixed(2)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* BLOCO DE EXTRATO DE VENDAS */}
+                    <div>
+                      <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 border-b pb-2">
+                        <Receipt size={18} className="text-blue-500" /> Extrato de Vendas ({detalhesCaixa.resumo.qtdVendas})
+                      </h3>
+                      
+                      {detalhesCaixa.vendas.length === 0 ? (
+                        <p className="text-gray-400 text-sm text-center py-4">Nenhuma venda registrada neste caixa.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {detalhesCaixa.vendas.map((venda) => (
+                            <div key={venda.id} className="bg-gray-50 border border-gray-100 rounded-xl p-4">
+                              <div className="flex justify-between items-center mb-3">
+                                <span className="text-xs text-gray-500 font-mono bg-gray-200 px-2 py-1 rounded">
+                                  {new Date(venda.criado_em).toLocaleTimeString('pt-BR')}
+                                </span>
+                                <div className="text-right">
+                                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                                    {venda.metodo_pagamento}
+                                  </span>
+                                  <span className="font-bold text-green-600">R$ {Number(venda.total).toFixed(2)}</span>
+                                </div>
+                              </div>
+                              
+                              {/* Itens da Venda */}
+                              <div className="border-t border-dashed border-gray-200 pt-2 mt-2 space-y-1">
+                                {venda.vendas_itens.map(item => (
+                                  <div key={item.id} className="flex justify-between text-sm text-gray-600">
+                                    <span className="flex items-center gap-1.5 truncate">
+                                      <ShoppingBag size={12} className="text-gray-400 shrink-0" />
+                                      {item.quantidade}x {item.nome}
+                                    </span>
+                                    <span className="shrink-0 text-gray-400 text-xs">
+                                      Custo R$ {Number(item.preco_custo).toFixed(2)}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
