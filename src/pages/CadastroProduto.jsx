@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, ArrowRight, CheckCircle, Tag, FileText, Barcode, DollarSign, Hash, ChevronRight, PackagePlus } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle, Tag, FileText, Barcode, DollarSign, Hash, ChevronRight, PackagePlus, Camera, Check, X } from 'lucide-react'
+import LeitorCamera from '../components/LeitorCamera'
 
 let slideDirection = 1
 
@@ -95,7 +96,7 @@ function PrimaryButton({ onClick, disabled, children, icon: Icon = ArrowRight })
 
 function StyledInput({ icon: Icon, label, ...props }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5 w-full">
       {label && (
         <label className="text-xs font-semibold text-[#86868B] uppercase tracking-wide pl-1">
           {label}
@@ -127,10 +128,13 @@ export default function CadastroProduto() {
   const [isLoteMode, setIsLoteMode] = useState(false)
   const [totalEtapas, setTotalEtapas] = useState(5)
 
-  // Estados de Interface
+  // Estados de Interface e Câmera
   const [carregando, setCarregando] = useState(false)
   const [buscando, setBuscando] = useState(false)
   const [sucesso, setSucesso] = useState(false)
+  
+  const [cameraAtiva, setCameraAtiva] = useState(false)
+  const [codigoLidoCamera, setCodigoLidoCamera] = useState(null)
 
   // Dados do Banco
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
@@ -166,7 +170,7 @@ export default function CadastroProduto() {
   const avancar = () => { slideDirection = 1; setEtapa(e => e + 1) }
   const voltar = () => { slideDirection = -1; setEtapa(e => e - 1) }
 
-  // 1. O OLHO DO LEITOR: Busca automaticamente enquanto digita/bipa
+  // 1. O OLHO DO LEITOR (INPUT FÍSICO / TECLADO)
   const handleBarcodeChange = (e) => {
     const codigo = e.target.value
     setDados(prev => ({ ...prev, codigoBarras: codigo }))
@@ -184,7 +188,7 @@ export default function CadastroProduto() {
           setProdutoExistente(null)
         }
         setBuscando(false)
-      }, 400) // Tempo de espera para o leitor terminar de bipar
+      }, 400)
     } else {
       setProdutoExistente(null)
       setBuscando(false)
@@ -198,6 +202,26 @@ export default function CadastroProduto() {
     } else if (e.key === 'Enter' && !produtoExistente && dados.codigoBarras.length >= 4) {
       iniciarModoManual()
     }
+  }
+
+  // Ação ao confirmar o código lido na câmera
+  const confirmarCodigoLido = async () => {
+    setCameraAtiva(false)
+    setDados(prev => ({ ...prev, codigoBarras: codigoLidoCamera }))
+    setBuscando(true)
+
+    const codigoFinal = codigoLidoCamera
+    setCodigoLidoCamera(null)
+
+    // Faz a consulta do produto logo após confirmar o código
+    const { data } = await supabase.from('produtos').select('*').eq('codigo_barras', codigoFinal).single()
+    if (data) {
+      setProdutoExistente(data)
+      setDados(prev => ({ ...prev, codigoBarras: codigoFinal, nome: data.nome, precoVenda: data.preco_venda }))
+    } else {
+      setProdutoExistente(null)
+    }
+    setBuscando(false)
   }
 
   // 2. RAMIFICAÇÕES DO FLUXO
@@ -233,8 +257,8 @@ export default function CadastroProduto() {
           preco_venda: parseFloat(dados.precoVenda) || 0,
           codigo_barras: dados.codigoBarras || null,
           marca_id: dados.marcaId,
-          preco_custo: parseFloat(dados.precoCusto) || 0, // Adicionado para satisfazer a not-null constraint
-          estoque: parseInt(dados.estoque) || 0       // Adicionado para satisfazer a not-null constraint
+          preco_custo: parseFloat(dados.precoCusto) || 0,
+          estoque: parseInt(dados.estoque) || 0
         }]).select().single()
 
         if (erroProd) throw erroProd
@@ -242,7 +266,6 @@ export default function CadastroProduto() {
       }
 
       // C. CRIA A FILA (LOTE)
-      // Verifica se já tem lote ativo
       const { data: loteAtivo } = await supabase.from('estoque_lotes')
         .select('id').eq('produto_id', produtoId).eq('status', 'ativo').limit(1)
 
@@ -309,7 +332,7 @@ export default function CadastroProduto() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10">
+    <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10 relative">
 
       <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-sm mb-4 px-1">
         <p className="text-xs font-semibold tracking-widest text-[#86868B] uppercase">Cadastro Inteligente</p>
@@ -328,15 +351,25 @@ export default function CadastroProduto() {
               <motion.div key="etapa1" custom={slideDirection} variants={stepVariants} initial="initial" animate="animate" exit="exit">
                 <StepLabel>Identifique o Produto</StepLabel>
 
-                <StyledInput
-                  icon={Barcode}
-                  placeholder="Bipe ou digite o código..."
-                  value={dados.codigoBarras}
-                  onChange={handleBarcodeChange}
-                  onKeyDown={handleKeyDown}
-                  inputMode="numeric"
-                  autoFocus
-                />
+                {/* CAMPO DE INPUT COM BOTÃO DA CÂMERA */}
+                <div className="flex items-start gap-2">
+                  <StyledInput
+                    icon={Barcode}
+                    placeholder="Aponte a câmera para o código de barras ou digite..."
+                    value={dados.codigoBarras}
+                    onChange={handleBarcodeChange}
+                    onKeyDown={handleKeyDown}
+                    inputMode="numeric"
+                    autoFocus
+                  />
+                  <button 
+                    onClick={() => setCameraAtiva(true)}
+                    className="h-14 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl shadow-md flex items-center justify-center transition-transform active:scale-95 shrink-0"
+                    title="Ativar Câmera"
+                  >
+                    <Camera size={24} />
+                  </button>
+                </div>
 
                 <div className="mt-4 min-h-[120px]">
                   {buscando ? (
@@ -477,6 +510,56 @@ export default function CadastroProduto() {
           </AnimatePresence>
         </div>
       </motion.div>
+
+      {/* =========================================
+          MODAL DA CÂMERA DE CADASTRO
+          ========================================= */}
+      {cameraAtiva && (
+        <div className="fixed inset-0 z-[500] bg-black">
+          {!codigoLidoCamera ? (
+            <LeitorCamera
+              onSucesso={(codigo) => setCodigoLidoCamera(codigo)}
+              onFechar={() => setCameraAtiva(false)}
+            />
+          ) : (
+            <div className="absolute inset-0 z-[600] bg-black/85 backdrop-blur-sm flex flex-col justify-center items-center p-6 animate-in zoom-in-95 duration-150">
+              <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl text-center border border-gray-100 relative">
+                <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 mx-auto mb-5 shadow-inner">
+                  <Barcode size={32} />
+                </div>
+                
+                <h3 className="font-mono text-xs uppercase tracking-widest text-gray-400 font-bold mb-1">Código Lido</h3>
+                <p className="text-3xl font-extrabold text-[#1D1D1F] mb-8 tracking-wider">{codigoLidoCamera}</p>
+
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={confirmarCodigoLido} 
+                    className="w-full py-5 font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 shadow-xl shadow-blue-500/30 transition-all flex items-center justify-center gap-2 text-lg active:scale-95"
+                  >
+                    <Check size={24} /> OK (Avançar)
+                  </button>
+                  
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <button 
+                      onClick={() => setCodigoLidoCamera(null)} 
+                      className="py-4 font-bold text-gray-500 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors flex items-center justify-center gap-1.5 active:scale-95"
+                    >
+                      <X size={18} /> Refazer
+                    </button>
+                    <button 
+                      onClick={() => { setCodigoLidoCamera(null); setCameraAtiva(false); }} 
+                      className="py-4 font-bold text-white bg-red-500 rounded-xl hover:bg-red-600 transition-colors flex items-center justify-center gap-1.5 active:scale-95"
+                    >
+                      <ArrowLeft size={18} /> Voltar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   )
 }
