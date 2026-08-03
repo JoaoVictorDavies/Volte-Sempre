@@ -7,13 +7,14 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
-import OrganizacaoCatalogo from './pages/OrganizacaoCatalogo' // ← Atualizado
+import OrganizacaoCatalogo from './pages/OrganizacaoCatalogo'
 import Estoque from './pages/Estoque'
 import Financeiro from './pages/Financeiro'
 import TesteImpressora from './pages/TesteImpressora'
 import Equipe from './pages/Equipe'
-import CaixaHome from './pages/CaixaHome' // ← Atualizado
+import CaixaHome from './pages/CaixaHome'
 import Pdv from './pages/Pdv'
+import InstalacaoBanner from './components/InstalacaoBanner' // ← Importado aqui
 
 export default function App() {
   // Verifica na memória do celular/PC se a pessoa já colocou a senha global antes
@@ -81,6 +82,9 @@ export default function App() {
   // SE TEM ACESSO, CARREGA O SISTEMA NORMALMENTE
   return (
     <BrowserRouter>
+      {/* O banner de instalação flutuante vai aparecer discretamente se o navegador permitir forçar a instalação */}
+      <InstalacaoBanner />
+
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<Home />} />
@@ -89,14 +93,14 @@ export default function App() {
           {/* Rotas do Admin */}
           <Route path="/admin-home" element={<AdminHome />} />
           <Route path="/cadastro-produto" element={<CadastroProduto />} />
-          <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} /> {/* ← Atualizado */}
+          <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
           <Route path="/estoque" element={<Estoque />} />
           <Route path="/financeiro" element={<Financeiro />} />
           <Route path="/teste-impressora" element={<TesteImpressora />} />
           <Route path="/equipe" element={<Equipe />} />
           
           {/* Rotas do Funcionário (Caixa) */}
-          <Route path="/caixa" element={<CaixaHome />} /> {/* ← Atualizado */}
+          <Route path="/caixa" element={<CaixaHome />} />
         </Route>
         
         {/* PDV (Fora do layout para usar a tela cheia e girar no celular) */}
