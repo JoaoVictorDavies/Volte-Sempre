@@ -1,11 +1,18 @@
 import { useEffect, useState, useRef } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
-import { X, Camera, Zap } from 'lucide-react'
+import { X, Camera, Zap, CheckCircle, ScanLine } from 'lucide-react'
 
 export default function LeitorCamera({ onSucesso, onFechar }) {
   const [iniciando, setIniciando] = useState(true)
   const [erro, setErro] = useState(null)
+  
+  // Estados para o feedback visual de captura automática
+  const [status, setStatus] = useState('lendo') // 'lendo' | 'lido'
+  const [codigoCapturado, setCodigoCapturado] = useState('')
+  
   const scannerRef = useRef(null)
+  const isProcessingRef = useRef(false) // Trava para não ler 2 vezes seguidas
+  
   const divId = "leitor-camera-volte"
 
   useEffect(() => {
@@ -17,19 +24,35 @@ export default function LeitorCamera({ onSucesso, onFechar }) {
         await html5QrCode.start(
           { facingMode: "environment" }, // Câmera traseira
           {
-            fps: 10,
-            // qrbox dinâmico: se adapta a qualquer tela de celular
+            fps: 15, // Aumentei um pouco o FPS para leitura mais ágil
             qrbox: (viewfinderWidth, viewfinderHeight) => {
               const width = Math.min(viewfinderWidth * 0.8, 300);
               return { width: width, height: 150 };
             },
-            // Sem aspectRatio forçado para não esmagar a imagem no modo retrato
           },
           (codigoDecodificado) => {
-            if (navigator.vibrate) navigator.vibrate(100)
-            onSucesso(codigoDecodificado)
+            // 1. Se já estiver processando um código, ignora
+            if (isProcessingRef.current) return;
+
+            // 2. FILTRO DE SEGURANÇA: Se ler algo menor que 8 números, foi erro de ângulo (corte). Ignora e continua lendo.
+            if (codigoDecodificado.length < 8) return;
+
+            // 3. CÓDIGO VÁLIDO ENCONTRADO!
+            isProcessingRef.current = true; // Trava o leitor
+            
+            // Vibração de sucesso (dupla)
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+            
+            // Atualiza a tela para mostrar o sucesso
+            setCodigoCapturado(codigoDecodificado)
+            setStatus('lido')
+
+            // Aguarda 1 segundo para o usuário ver que leu, e já envia a resposta e fecha
+            setTimeout(() => {
+              onSucesso(codigoDecodificado)
+            }, 1000)
           },
-          () => {} // Ignora erros de frame vazio
+          () => {} // Ignora erros de frame vazio em silêncio
         )
         setIniciando(false)
       } catch (err) {
@@ -45,7 +68,7 @@ export default function LeitorCamera({ onSucesso, onFechar }) {
         scannerRef.current.stop().catch(console.error)
       }
     }
-  }, [])
+  }, [onSucesso])
 
   return (
     <div className="absolute inset-0 bg-black flex flex-col overflow-hidden">
@@ -93,15 +116,31 @@ export default function LeitorCamera({ onSucesso, onFechar }) {
             </div>
           </div>
         ) : (
-          <div id={divId} className="w-full h-full absolute inset-0"></div>
+          <div id={divId} className={`w-full h-full absolute inset-0 transition-opacity duration-300 ${status === 'lido' ? 'opacity-0' : 'opacity-100'}`}></div>
+        )}
+
+        {/* FEEDBACK DE SUCESSO (OVERLAY VERDE ZERO CLIQUES) */}
+        {status === 'lido' && (
+          <div className="absolute inset-0 z-50 bg-green-500 flex flex-col items-center justify-center text-white animate-in zoom-in-95 duration-200">
+            <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center mb-6">
+              <CheckCircle size={48} className="text-white" />
+            </div>
+            <h2 className="text-3xl font-extrabold mb-2 tracking-tight shadow-black/10 drop-shadow-sm">Capturado!</h2>
+            <div className="bg-black/20 px-6 py-3 rounded-2xl border border-white/20 mt-4 backdrop-blur-sm">
+              <p className="font-mono text-xl tracking-widest font-bold">{codigoCapturado}</p>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* RODAPÉ FLUTUANTE */}
-      <div className="absolute bottom-10 inset-x-0 z-50 flex justify-center pointer-events-none">
-        <div className="bg-black/60 backdrop-blur-md px-6 py-3 rounded-full text-white text-center border border-white/10">
-          <p className="text-sm font-bold tracking-wider uppercase text-blue-400">Aponte para o Código</p>
-        </div>
+      {/* RODAPÉ FLUTUANTE (Muda de acordo com o status) */}
+      <div className="absolute bottom-10 inset-x-0 z-40 flex justify-center pointer-events-none transition-all">
+        {status === 'lendo' && !iniciando && !erro && (
+          <div className="bg-black/60 backdrop-blur-md px-6 py-3 rounded-full text-white text-center border border-white/10 flex items-center gap-2 animate-pulse">
+            <ScanLine size={18} className="text-blue-400" />
+            <p className="text-sm font-bold tracking-wider uppercase text-blue-400">Escaneando...</p>
+          </div>
+        )}
       </div>
     </div>
   )

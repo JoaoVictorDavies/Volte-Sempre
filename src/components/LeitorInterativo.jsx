@@ -5,6 +5,7 @@ import LeitorCamera from './LeitorCamera'
 export default function LeitorInterativo({ catalogo, aoConfirmar, aoFechar }) {
   const [produtoDetectado, setProdutoDetectado] = useState(null)
   
+  // ESSE É O LEITOR PARA CAIXA. AQUI VAI FICAR O BIPADOR DE CODIGO DE BARRAS
   // A Trava do Gatilho! Se for true, a câmera ignora as leituras.
   const travaRef = useRef(false) 
 
