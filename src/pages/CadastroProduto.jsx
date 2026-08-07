@@ -178,6 +178,7 @@ export default function CadastroProduto() {
   const avancar = () => { slideDirection = 1; setEtapa(e => e + 1) }
   const voltar = () => { slideDirection = -1; setEtapa(e => e - 1) }
 
+  // Buscando o produto via input com INNER JOIN para pegar Marca, Setor e Estoque
   const handleBarcodeChange = (e) => {
     const codigo = e.target.value
     setDados(prev => ({ ...prev, codigoBarras: codigo }))
@@ -187,8 +188,18 @@ export default function CadastroProduto() {
     if (codigo.length >= 4) {
       setBuscando(true)
       debounceRef.current = setTimeout(async () => {
-        const { data } = await supabase.from('produtos').select('*').eq('codigo_barras', codigo).single()
+        const { data } = await supabase
+          .from('produtos')
+          .select('*, marcas(nome, setores(nome)), estoque_lotes(quantidade_atual)')
+          .eq('codigo_barras', codigo)
+          .single()
+
         if (data) {
+          const estoqueTotal = data.estoque_lotes 
+            ? data.estoque_lotes.reduce((acc, lote) => acc + (lote.quantidade_atual || 0), 0) 
+            : 0;
+          data.estoqueTotal = estoqueTotal;
+          
           setProdutoExistente(data)
           setDados(prev => ({ ...prev, nome: data.nome, precoVenda: data.preco_venda }))
         } else {
@@ -216,6 +227,7 @@ export default function CadastroProduto() {
     setCodigoLidoCamera(codigo);
   }
 
+  // Buscando o produto via Câmera com INNER JOIN para pegar Marca, Setor e Estoque
   const confirmarCodigoLido = async () => {
     setCameraAtiva(false)
     setDados(prev => ({ ...prev, codigoBarras: codigoLidoCamera }))
@@ -226,8 +238,18 @@ export default function CadastroProduto() {
     
     setTimeout(() => { travaCameraRef.current = false }, 400)
 
-    const { data } = await supabase.from('produtos').select('*').eq('codigo_barras', codigoFinal).single()
+    const { data } = await supabase
+      .from('produtos')
+      .select('*, marcas(nome, setores(nome)), estoque_lotes(quantidade_atual)')
+      .eq('codigo_barras', codigoFinal)
+      .single()
+
     if (data) {
+      const estoqueTotal = data.estoque_lotes 
+        ? data.estoque_lotes.reduce((acc, lote) => acc + (lote.quantidade_atual || 0), 0) 
+        : 0;
+      data.estoqueTotal = estoqueTotal;
+
       setProdutoExistente(data)
       setDados(prev => ({ ...prev, codigoBarras: codigoFinal, nome: data.nome, precoVenda: data.preco_venda }))
     } else {
@@ -378,11 +400,33 @@ export default function CadastroProduto() {
                     <div className="text-center py-6 text-blue-500 font-medium animate-pulse">Consultando acervo...</div>
                   ) : produtoExistente ? (
                     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-green-50 p-5 rounded-2xl border border-green-200">
-                      <div className="flex items-center gap-3 mb-3 text-green-700">
+                      <div className="flex items-center gap-2 mb-3 text-green-700">
                         <CheckCircle size={20} /> <span className="font-bold">Produto Localizado!</span>
                       </div>
-                      <p className="font-bold text-gray-800 text-lg leading-tight mb-1">{produtoExistente.nome}</p>
-                      <p className="text-sm text-gray-500 mb-4">Atual: R$ {produtoExistente.preco_venda}</p>
+                      
+                      <p className="font-bold text-gray-800 text-lg leading-tight mb-3">{produtoExistente.nome}</p>
+                      
+                      <div className="flex flex-col gap-2 text-sm text-gray-600 mb-5 bg-white p-3 rounded-xl border border-green-100 shadow-sm">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-gray-500">Preço:</span>
+                          <span className="font-bold text-green-700">R$ {Number(produtoExistente.preco_venda).toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-gray-500">Unidades Registradas:</span>
+                          <span className={`font-bold ${produtoExistente.estoqueTotal === 0 ? 'text-red-500' : 'text-gray-800'}`}>
+                            {produtoExistente.estoqueTotal}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center border-t border-gray-100 pt-2 mt-1">
+                          <span className="font-medium text-gray-500">Setor:</span>
+                          <span className="font-semibold text-gray-700">{produtoExistente.marcas?.setores?.nome || 'N/A'}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-gray-500">Marca:</span>
+                          <span className="font-semibold text-gray-700">{produtoExistente.marcas?.nome || 'N/A'}</span>
+                        </div>
+                      </div>
+
                       <PrimaryButton onClick={iniciarModoLote} icon={PackagePlus}>Adicionar Estoque</PrimaryButton>
                     </motion.div>
                   ) : dados.codigoBarras.length >= 4 ? (
@@ -428,7 +472,6 @@ export default function CadastroProduto() {
                   />
 
                   <div className="mt-4">
-                    {/* O BOTÃO AGORA SÓ FICA ATIVO QUANDO TUDO ESTIVER PREENCHIDO */}
                     <PrimaryButton onClick={finalizarCadastro} disabled={carregando || !formValido} icon={carregando ? null : CheckCircle}>
                       {carregando ? 'Salvando…' : 'Finalizar Adição'}
                     </PrimaryButton>
@@ -436,7 +479,14 @@ export default function CadastroProduto() {
                 </div>
 
                 <div className="mt-5">
-                  <BackButton onClick={() => { setProdutoExistente(null); voltar(); }} label="Voltar ao Leitor" />
+                  <BackButton 
+                    onClick={() => { 
+                      setProdutoExistente(null); 
+                      setDados(prev => ({ ...prev, codigoBarras: '' })); // BUG CORRIGIDO AQUI: Limpa o input!
+                      voltar(); 
+                    }} 
+                    label="Voltar ao Leitor" 
+                  />
                 </div>
               </motion.div>
             )}
@@ -496,7 +546,6 @@ export default function CadastroProduto() {
                   <StyledInput icon={Tag} label="Preço de Venda (R$)" type="number" placeholder="0,00" inputMode="decimal" value={dados.precoVenda} onChange={e => setDados({ ...dados, precoVenda: e.target.value })} />
 
                   <div className="mt-2">
-                    {/* O BOTÃO AGORA SÓ FICA ATIVO QUANDO TUDO ESTIVER PREENCHIDO */}
                     <PrimaryButton onClick={finalizarCadastro} disabled={carregando || !formValido} icon={carregando ? null : CheckCircle}>
                       {carregando ? 'Salvando…' : 'Finalizar Cadastro'}
                     </PrimaryButton>
