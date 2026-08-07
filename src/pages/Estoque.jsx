@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera } from 'lucide-react'
+import LeitorCamera from '../components/LeitorCamera' // Importando o nosso leitor sniper
 
 // Mini-componente para gerenciar a "gaveta" de lotes e a exibição de cada produto
-function ProdutoItem({ produto }) {
+function ProdutoItem({ produto, onAtualizar, codigoBuscado }) {
   const [expandido, setExpandido] = useState(false)
   
   // Estados para a edição do nome do produto
@@ -13,8 +14,24 @@ function ProdutoItem({ produto }) {
   const [editNome, setEditNome] = useState(produto.nome)
   const [isSaving, setIsSaving] = useState(false)
 
+  // Efeito para expandir e rolar até o produto caso ele tenha sido o lido pela câmera
+  const isDestacado = codigoBuscado === produto.codigo_barras
+
+  useEffect(() => {
+    if (isDestacado) {
+      setExpandido(true)
+      // Um pequeno delay para dar tempo da gaveta da Marca abrir antes de rolar a tela
+      setTimeout(() => {
+        document.getElementById(`produto-${produto.id}`)?.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'center' 
+        })
+      }, 300)
+    }
+  }, [isDestacado, produto.id])
+
   const handleSaveNome = async (e) => {
-    e.stopPropagation() // Evita que a gaveta abra/feche ao salvar
+    e.stopPropagation() 
     if (!editNome.trim()) {
       setIsEditing(false)
       return
@@ -44,15 +61,39 @@ function ProdutoItem({ produto }) {
     setIsEditing(false)
   }
 
+  const handleExcluir = async (e) => {
+    e.stopPropagation()
+
+    // Regra de Negócio: Se tem estoque, avisa. Se é zero, exclui direto.
+    if (produto.estoqueReal > 0) {
+      const confirma = window.confirm(`ATENÇÃO! Esse produto tem ${produto.estoqueReal} itens no estoque. Excluir mesmo assim?`)
+      if (!confirma) return
+    }
+
+    setIsSaving(true)
+    try {
+      const { error } = await supabase.from('produtos').delete().eq('id', produto.id)
+      if (error) throw error
+      
+      onAtualizar() // Recarrega a tela para o produto sumir
+    } catch (error) {
+      alert("Erro ao excluir o produto: " + error.message)
+      setIsSaving(false)
+    }
+  }
+
   return (
-    <div className="flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden mb-3 shadow-sm transition-all hover:shadow-md">
+    <div 
+      id={`produto-${produto.id}`}
+      className={`flex flex-col rounded-xl border overflow-hidden mb-3 transition-all duration-500 ${isDestacado ? 'border-blue-400 ring-4 ring-blue-500/20 bg-blue-50/30 shadow-lg' : 'bg-white border-gray-200 shadow-sm hover:shadow-md'}`}
+    >
       {/* LINHA PRINCIPAL DO PRODUTO (Clicável) */}
       <div 
         onClick={() => !isEditing && setExpandido(!expandido)}
         className={`flex justify-between items-center p-4 transition-colors ${!isEditing ? 'cursor-pointer hover:bg-gray-50' : ''}`}
       >
         <div className="flex items-start gap-3 flex-1">
-          <div className="mt-1 text-gray-400">
+          <div className={`mt-1 ${isDestacado ? 'text-blue-500' : 'text-gray-400'}`}>
             {expandido ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
           </div>
           <div className="flex-1">
@@ -80,17 +121,29 @@ function ProdutoItem({ produto }) {
                   {displayNome}
                 </span>
                 
-                {/* Botão de Editar Nome */}
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setIsEditing(true)
-                  }} 
-                  className="text-gray-400 hover:text-blue-500 bg-gray-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
-                  title="Editar Nome do Produto"
-                >
-                  <Edit2 size={14} />
-                </button>
+                <div className="flex items-center gap-1">
+                  {/* Botão de Editar Nome */}
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setIsEditing(true)
+                    }} 
+                    className="text-gray-400 hover:text-blue-500 bg-gray-50 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
+                    title="Editar Nome"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+
+                  {/* Botão de Excluir Produto */}
+                  <button 
+                    onClick={handleExcluir} 
+                    disabled={isSaving}
+                    className="text-gray-400 hover:text-red-500 bg-gray-50 hover:bg-red-50 p-1.5 rounded-lg transition-colors disabled:opacity-50"
+                    title="Excluir Produto"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
 
                 {/* Badge de Esgotado */}
                 {produto.estoqueReal === 0 && (
@@ -171,8 +224,15 @@ function ProdutoItem({ produto }) {
 }
 
 // Mini-componente para gerenciar a "gaveta" das MARCAS (Recolhido por Padrão)
-function MarcaItem({ marcaNome, produtos }) {
+function MarcaItem({ marcaNome, produtos, onAtualizar, codigoBuscado }) {
   const [expandido, setExpandido] = useState(false)
+
+  // Se a câmera leu um código que pertence a esta marca, força a gaveta da marca a abrir
+  useEffect(() => {
+    if (codigoBuscado && produtos.some(p => p.codigo_barras === codigoBuscado)) {
+      setExpandido(true)
+    }
+  }, [codigoBuscado, produtos])
 
   return (
     <div className="relative border-b border-gray-100 last:border-0 pb-4 mb-4 last:mb-0 last:pb-0">
@@ -199,7 +259,12 @@ function MarcaItem({ marcaNome, produtos }) {
       {expandido && (
         <div className="pl-0 md:pl-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
           {produtos.map(p => (
-            <ProdutoItem key={p.id} produto={p} />
+            <ProdutoItem 
+              key={p.id} 
+              produto={p} 
+              onAtualizar={onAtualizar} 
+              codigoBuscado={codigoBuscado}
+            />
           ))}
         </div>
       )}
@@ -211,70 +276,95 @@ export default function Estoque() {
   const navigate = useNavigate()
   const [carregando, setCarregando] = useState(true)
   const [dadosAgrupados, setDadosAgrupados] = useState({})
+  
+  // Estados para o Leitor de Câmera
+  const [cameraAtiva, setCameraAtiva] = useState(false)
+  const [codigoBuscado, setCodigoBuscado] = useState(null)
 
-  useEffect(() => {
-    async function carregarEstoque() {
-      setCarregando(true)
-      try {
-        const [resSetores, resMarcas, resProdutos] = await Promise.all([
-          supabase.from('setores').select('*').order('nome'),
-          supabase.from('marcas').select('*').order('nome'),
-          supabase.from('produtos').select('*, estoque_lotes(*)').order('nome')
-        ])
+  const carregarEstoque = async () => {
+    setCarregando(true)
+    try {
+      const [resSetores, resMarcas, resProdutos] = await Promise.all([
+        supabase.from('setores').select('*').order('nome'),
+        supabase.from('marcas').select('*').order('nome'),
+        supabase.from('produtos').select('*, estoque_lotes(*)').order('nome')
+      ])
 
-        if (resSetores.error) throw resSetores.error
-        if (resMarcas.error) throw resMarcas.error
-        if (resProdutos.error) throw resProdutos.error
+      if (resSetores.error) throw resSetores.error
+      if (resMarcas.error) throw resMarcas.error
+      if (resProdutos.error) throw resProdutos.error
 
-        const estrutura = {}
+      const estrutura = {}
 
-        resSetores.data.forEach(setor => {
-          const dictMarcas = {}
+      resSetores.data.forEach(setor => {
+        const dictMarcas = {}
+        
+        const marcasDoSetor = resMarcas.data.filter(m => m.setor_id === setor.id)
+        marcasDoSetor.forEach(marca => {
           
-          const marcasDoSetor = resMarcas.data.filter(m => m.setor_id === setor.id)
-          marcasDoSetor.forEach(marca => {
+          const produtosDaMarca = resProdutos.data.filter(p => p.marca_id === marca.id)
+          
+          const produtosValidos = produtosDaMarca.map(p => {
+            const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
             
-            const produtosDaMarca = resProdutos.data.filter(p => p.marca_id === marca.id)
+            lotesValidos.sort((a, b) => {
+              if (a.status === 'ativo' && b.status !== 'ativo') return -1;
+              if (a.status !== 'ativo' && b.status === 'ativo') return 1;
+              return new Date(a.criado_em) - new Date(b.criado_em);
+            });
+
+            const estoqueReal = lotesValidos.reduce((acc, lote) => acc + lote.quantidade_atual, 0)
             
-            const produtosValidos = produtosDaMarca.map(p => {
-              const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
-              
-              lotesValidos.sort((a, b) => {
-                if (a.status === 'ativo' && b.status !== 'ativo') return -1;
-                if (a.status !== 'ativo' && b.status === 'ativo') return 1;
-                return new Date(a.criado_em) - new Date(b.criado_em);
-              });
-
-              const estoqueReal = lotesValidos.reduce((acc, lote) => acc + lote.quantidade_atual, 0)
-              
-              return { ...p, lotesValidos, estoqueReal }
-            })
-
-            // Se houver qualquer produto cadastrado na marca, ela será mostrada
-            if (produtosValidos.length > 0) {
-              dictMarcas[marca.nome] = produtosValidos
-            }
+            return { ...p, lotesValidos, estoqueReal }
           })
 
-          if (Object.keys(dictMarcas).length > 0) {
-            estrutura[setor.nome] = dictMarcas
+          if (produtosValidos.length > 0) {
+            dictMarcas[marca.nome] = produtosValidos
           }
         })
 
-        setDadosAgrupados(estrutura)
-      } catch (error) {
-        console.error("Erro ao carregar dados:", error)
-      } finally {
-        setCarregando(false)
-      }
-    }
+        if (Object.keys(dictMarcas).length > 0) {
+          estrutura[setor.nome] = dictMarcas
+        }
+      })
 
+      setDadosAgrupados(estrutura)
+    } catch (error) {
+      console.error("Erro ao carregar dados:", error)
+    } finally {
+      setCarregando(false)
+    }
+  }
+
+  useEffect(() => {
     carregarEstoque()
   }, [])
 
+  // Função disparada quando o componente sniper (LeitorCamera) finaliza a leitura
+  const handleCameraSucesso = (codigo) => {
+    setCameraAtiva(false)
+    
+    // Verifica se o código lido existe nos dados atuais
+    let encontrou = false
+    Object.values(dadosAgrupados).forEach(marcas => {
+      Object.values(marcas).forEach(produtos => {
+        if (produtos.some(p => p.codigo_barras === codigo)) encontrou = true
+      })
+    })
+
+    if (encontrou) {
+      setCodigoBuscado(codigo)
+      
+      // Limpa o destaque após 5 segundos para não ficar azul para sempre
+      setTimeout(() => setCodigoBuscado(null), 5000)
+    } else {
+      alert(`O produto com código ${codigo} não foi encontrado no estoque atual.`)
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-8 animate-in fade-in duration-300">
-      <header className="mb-8 flex justify-between items-center">
+      <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-2 flex items-center gap-1 hover:underline focus:outline-none">
             ← Voltar ao Painel
@@ -284,6 +374,15 @@ export default function Estoque() {
           </h1>
           <p className="text-[#86868B] mt-1 text-sm">Controle detalhado de remessas e capital.</p>
         </div>
+        
+        {/* Botão que aciona a Câmera */}
+        <button 
+          onClick={() => setCameraAtiva(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl flex items-center justify-center gap-2 shadow-md transition-transform active:scale-95"
+        >
+          <Camera size={20} />
+          <span>Localizar Produto</span>
+        </button>
       </header>
 
       {carregando ? (
@@ -302,16 +401,32 @@ export default function Estoque() {
                 <h2 className="text-white font-bold text-xl uppercase tracking-widest">{setorNome}</h2>
               </div>
 
-              {/* Ajustei o padding e o espaço interno já que as marcas agora ficam recolhidas */}
               <div className="p-5 md:p-8 space-y-2">
                 {Object.entries(marcas).map(([marcaNome, produtos]) => (
-                  <MarcaItem key={marcaNome} marcaNome={marcaNome} produtos={produtos} />
+                  <MarcaItem 
+                    key={marcaNome} 
+                    marcaNome={marcaNome} 
+                    produtos={produtos} 
+                    onAtualizar={carregarEstoque} // Passando a função que recarrega a tela pós-exclusão
+                    codigoBuscado={codigoBuscado}
+                  />
                 ))}
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* MODAL DO LEITOR DE CÂMERA SNIPER */}
+      {cameraAtiva && (
+        <div className="fixed inset-0 z-[100] bg-black">
+          <LeitorCamera 
+            onSucesso={handleCameraSucesso}
+            onFechar={() => setCameraAtiva(false)}
+          />
+        </div>
+      )}
+
     </div>
   )
 }
