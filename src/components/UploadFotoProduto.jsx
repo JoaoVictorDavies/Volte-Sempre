@@ -5,15 +5,10 @@ import { Camera, Image as ImageIcon, Loader2 } from 'lucide-react'
 
 export default function UploadFotoProduto({ produtoId, urlAtual, onUploadConcluido }) {
   const [carregando, setCarregando] = useState(false)
-  const fileInputRef = useRef(null)
+  const cameraInputRef = useRef(null)
+  const galeriaInputRef = useRef(null)
 
-  const handleAbrirOpcoes = (e) => {
-    e.stopPropagation() // Evita que a gaveta do estoque feche
-    fileInputRef.current?.click()
-  }
-
-  const handleFileChange = async (event) => {
-    const file = event.target.files[0]
+  const processarArquivo = async (file) => {
     if (!file) return
 
     setCarregando(true)
@@ -29,7 +24,6 @@ export default function UploadFotoProduto({ produtoId, urlAtual, onUploadConclui
       const compressedFile = await imageCompression(file, options)
 
       // 2. NOME ÚNICO E LIMPO
-      // Adicionamos a data para que, se ele trocar a foto, o link mude e o celular não puxe do cache antigo
       const fileName = `${produtoId}_${Date.now()}.jpg`
 
       // 3. UPLOAD PARA O SUPABASE (Bucket: produtos)
@@ -37,7 +31,7 @@ export default function UploadFotoProduto({ produtoId, urlAtual, onUploadConclui
         .from('produtos')
         .upload(fileName, compressedFile, {
           cacheControl: '3600',
-          upsert: false // False pois o timestamp no nome já garante que é único
+          upsert: false
         })
 
       if (uploadError) throw uploadError
@@ -67,18 +61,32 @@ export default function UploadFotoProduto({ produtoId, urlAtual, onUploadConclui
       alert("Falha ao salvar a foto. Tente novamente.")
     } finally {
       setCarregando(false)
-      // Reseta o input para permitir selecionar a mesma foto caso dê erro
-      if (fileInputRef.current) fileInputRef.current.value = ''
     }
+  }
+
+  const handleFileChange = (event) => {
+    const file = event.target.files[0]
+    if (file) processarArquivo(file)
+    event.target.value = '' // Reseta para permitir reuso
   }
 
   return (
     <div className="flex flex-col items-center">
-      {/* INPUT INVISÍVEL QUE CHAMA A CÂMERA/GALERIA NATIVA DO CELULAR */}
+      {/* INPUT 1: Força a Câmera diretamente */}
       <input
         type="file"
         accept="image/*"
-        ref={fileInputRef}
+        capture="environment"
+        ref={cameraInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
+      {/* INPUT 2: Abre a Galeria / Arquivos */}
+      <input
+        type="file"
+        accept="image/*"
+        ref={galeriaInputRef}
         onChange={handleFileChange}
         className="hidden"
       />
@@ -90,32 +98,51 @@ export default function UploadFotoProduto({ produtoId, urlAtual, onUploadConclui
           <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Enviando...</span>
         </div>
       ) : urlAtual ? (
-        // ESTADO: COM FOTO
-        <div 
-          onClick={handleAbrirOpcoes}
-          className="relative w-28 h-28 rounded-2xl overflow-hidden border border-gray-200 shadow-sm cursor-pointer group"
-        >
-          <img 
-            src={urlAtual} 
-            alt="Produto" 
-            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-          />
-          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <Camera size={24} className="text-white drop-shadow-md" />
+        // ESTADO: COM FOTO (Mostra a foto e botões compactos embaixo para alterar)
+        <div className="flex flex-col items-center gap-2">
+          <div className="relative w-28 h-28 rounded-2xl overflow-hidden border border-gray-200 shadow-sm">
+            <img 
+              src={urlAtual} 
+              alt="Produto" 
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div className="flex gap-1.5 w-full">
+            <button
+              onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+              className="flex-1 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg text-[11px] font-bold transition-colors flex items-center justify-center gap-1"
+              title="Tirar nova foto com a câmera"
+            >
+              <Camera size={13} /> Câmera
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); galeriaInputRef.current?.click(); }}
+              className="flex-1 py-1 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-[11px] font-bold transition-colors flex items-center justify-center gap-1"
+              title="Escolher da galeria"
+            >
+              <ImageIcon size={13} /> Galeria
+            </button>
           </div>
         </div>
       ) : (
-        // ESTADO: SEM FOTO (Vazio)
-        <button
-          onClick={handleAbrirOpcoes}
-          className="w-28 h-28 bg-[#F5F5F7] hover:bg-gray-200 border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center gap-2 transition-colors focus:outline-none"
-        >
-          <div className="flex -space-x-2 text-gray-400">
-            <ImageIcon size={20} className="bg-[#F5F5F7] rounded-full ring-2 ring-[#F5F5F7]" />
-            <Camera size={20} className="bg-[#F5F5F7] rounded-full ring-2 ring-[#F5F5F7]" />
-          </div>
-          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Adicionar<br/>Foto</span>
-        </button>
+        // ESTADO: SEM FOTO (Dois botões claros: Câmera ou Galeria)
+        <div className="flex flex-col gap-2 w-28">
+          <button
+            onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+            className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl flex flex-col items-center justify-center gap-0.5 shadow-sm transition-colors"
+            title="Tirar foto com a câmera"
+          >
+            <Camera size={18} />
+            <span className="text-[9px] font-bold tracking-wider uppercase">Câmera</span>
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); galeriaInputRef.current?.click(); }}
+            className="w-full h-9 bg-[#F5F5F7] hover:bg-gray-200 text-gray-600 rounded-xl flex items-center justify-center gap-1 transition-colors text-xs font-bold"
+            title="Escolher da galeria"
+          >
+            <ImageIcon size={13} /> Galeria
+          </button>
+        </div>
       )}
     </div>
   )
