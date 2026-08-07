@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera } from 'lucide-react'
-import LeitorCamera from '../components/LeitorCamera' // Importando o nosso leitor sniper
+import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera, AlertCircle } from 'lucide-react'
+import LeitorCamera from '../components/LeitorCamera' 
 
 // Mini-componente para gerenciar a "gaveta" de lotes e a exibição de cada produto
-function ProdutoItem({ produto, onAtualizar, codigoBuscado }) {
+function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
   const [expandido, setExpandido] = useState(false)
   
   // Estados para a edição do nome do produto
@@ -14,8 +14,8 @@ function ProdutoItem({ produto, onAtualizar, codigoBuscado }) {
   const [editNome, setEditNome] = useState(produto.nome)
   const [isSaving, setIsSaving] = useState(false)
 
-  // Efeito para expandir e rolar até o produto caso ele tenha sido o lido pela câmera
-  const isDestacado = codigoBuscado === produto.codigo_barras
+  // Verifica se o ID deste produto é o que foi encontrado pela câmera
+  const isDestacado = produtoDestacadoId && produtoDestacadoId === produto.id
 
   useEffect(() => {
     if (isDestacado) {
@@ -224,15 +224,15 @@ function ProdutoItem({ produto, onAtualizar, codigoBuscado }) {
 }
 
 // Mini-componente para gerenciar a "gaveta" das MARCAS (Recolhido por Padrão)
-function MarcaItem({ marcaNome, produtos, onAtualizar, codigoBuscado }) {
+function MarcaItem({ marcaNome, produtos, onAtualizar, produtoDestacadoId }) {
   const [expandido, setExpandido] = useState(false)
 
-  // Se a câmera leu um código que pertence a esta marca, força a gaveta da marca a abrir
+  // Se a câmera leu um produto que pertence a esta marca, força a gaveta da marca a abrir
   useEffect(() => {
-    if (codigoBuscado && produtos.some(p => p.codigo_barras === codigoBuscado)) {
+    if (produtoDestacadoId && produtos.some(p => p.id === produtoDestacadoId)) {
       setExpandido(true)
     }
-  }, [codigoBuscado, produtos])
+  }, [produtoDestacadoId, produtos])
 
   return (
     <div className="relative border-b border-gray-100 last:border-0 pb-4 mb-4 last:mb-0 last:pb-0">
@@ -263,7 +263,7 @@ function MarcaItem({ marcaNome, produtos, onAtualizar, codigoBuscado }) {
               key={p.id} 
               produto={p} 
               onAtualizar={onAtualizar} 
-              codigoBuscado={codigoBuscado}
+              produtoDestacadoId={produtoDestacadoId}
             />
           ))}
         </div>
@@ -279,7 +279,10 @@ export default function Estoque() {
   
   // Estados para o Leitor de Câmera
   const [cameraAtiva, setCameraAtiva] = useState(false)
-  const [codigoBuscado, setCodigoBuscado] = useState(null)
+  const [produtoDestacadoId, setProdutoDestacadoId] = useState(null)
+  
+  // Estado para quando a câmera lê um código inexistente
+  const [codigoNaoEncontrado, setCodigoNaoEncontrado] = useState(null)
 
   const carregarEstoque = async () => {
     setCarregando(true)
@@ -344,21 +347,24 @@ export default function Estoque() {
   const handleCameraSucesso = (codigo) => {
     setCameraAtiva(false)
     
-    // Verifica se o código lido existe nos dados atuais
-    let encontrou = false
+    // Busca o ID único do produto lido para evitar conflitos de "null" ou repetidos
+    let idEncontrado = null
     Object.values(dadosAgrupados).forEach(marcas => {
       Object.values(marcas).forEach(produtos => {
-        if (produtos.some(p => p.codigo_barras === codigo)) encontrou = true
+        if (!idEncontrado) {
+          const p = produtos.find(p => p.codigo_barras && p.codigo_barras === codigo)
+          if (p) idEncontrado = p.id
+        }
       })
     })
 
-    if (encontrou) {
-      setCodigoBuscado(codigo)
-      
+    if (idEncontrado) {
+      setProdutoDestacadoId(idEncontrado)
       // Limpa o destaque após 5 segundos para não ficar azul para sempre
-      setTimeout(() => setCodigoBuscado(null), 5000)
+      setTimeout(() => setProdutoDestacadoId(null), 5000)
     } else {
-      alert(`O produto com código ${codigo} não foi encontrado no estoque atual.`)
+      // Abre o modal de produto não encontrado
+      setCodigoNaoEncontrado(codigo)
     }
   }
 
@@ -407,8 +413,8 @@ export default function Estoque() {
                     key={marcaNome} 
                     marcaNome={marcaNome} 
                     produtos={produtos} 
-                    onAtualizar={carregarEstoque} // Passando a função que recarrega a tela pós-exclusão
-                    codigoBuscado={codigoBuscado}
+                    onAtualizar={carregarEstoque} 
+                    produtoDestacadoId={produtoDestacadoId}
                   />
                 ))}
               </div>
@@ -424,6 +430,38 @@ export default function Estoque() {
             onSucesso={handleCameraSucesso}
             onFechar={() => setCameraAtiva(false)}
           />
+        </div>
+      )}
+
+      {/* MODAL: PRODUTO NÃO ENCONTRADO */}
+      {codigoNaoEncontrado && (
+        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center animate-in zoom-in-95">
+            <div className="w-16 h-16 bg-red-50 border border-red-100 rounded-2xl flex items-center justify-center mx-auto mb-5 text-red-500">
+              <AlertCircle size={32} />
+            </div>
+            
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Produto não localizado</h3>
+            <p className="text-gray-500 text-sm mb-4">
+              O código <strong className="text-gray-800 font-mono text-base ml-1">{codigoNaoEncontrado}</strong> não foi encontrado.
+            </p>
+            <p className="text-gray-600 font-medium mb-8">Deseja registrar este produto em sua loja agora?</p>
+            
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={() => navigate('/cadastro-produto')}
+                className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 hover:bg-blue-700 transition-colors active:scale-95"
+              >
+                Sim, Cadastrar Produto
+              </button>
+              <button 
+                onClick={() => setCodigoNaoEncontrado(null)}
+                className="w-full py-4 bg-gray-100 text-gray-600 font-bold rounded-xl hover:bg-gray-200 transition-colors active:scale-95"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
