@@ -13,6 +13,10 @@ export default function LeitorCamera({ onSucesso, onFechar }) {
   const scannerRef = useRef(null)
   const isProcessingRef = useRef(false) // Trava para não ler 2 vezes seguidas
   
+  // Memória do Double Check
+  const lastCodeRef = useRef(null)
+  const matchCountRef = useRef(0)
+  
   const divId = "leitor-camera-volte"
 
   useEffect(() => {
@@ -24,33 +28,45 @@ export default function LeitorCamera({ onSucesso, onFechar }) {
         await html5QrCode.start(
           { facingMode: "environment" }, // Câmera traseira
           {
-            fps: 15, // Aumentei um pouco o FPS para leitura mais ágil
+            fps: 15, // Velocidade alta de frames por segundo
             qrbox: (viewfinderWidth, viewfinderHeight) => {
               const width = Math.min(viewfinderWidth * 0.8, 300);
               return { width: width, height: 150 };
             },
           },
           (codigoDecodificado) => {
-            // 1. Se já estiver processando um código, ignora
+            // 1. Se já estiver processando a tela de sucesso, ignora
             if (isProcessingRef.current) return;
 
-            // 2. FILTRO DE SEGURANÇA: Se ler algo menor que 8 números, foi erro de ângulo (corte). Ignora e continua lendo.
+            // 2. FILTRO DE TAMANHO: Códigos pequenos demais são descartados de cara
             if (codigoDecodificado.length < 8) return;
 
-            // 3. CÓDIGO VÁLIDO ENCONTRADO!
-            isProcessingRef.current = true; // Trava o leitor
-            
-            // Vibração de sucesso (dupla)
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100])
-            
-            // Atualiza a tela para mostrar o sucesso
-            setCodigoCapturado(codigoDecodificado)
-            setStatus('lido')
+            // 3. MOTOR DE DUPLA CHECAGEM (Double Check)
+            if (codigoDecodificado === lastCodeRef.current) {
+              matchCountRef.current += 1;
+            } else {
+              // Se o código mudou (ex: estava lendo pela metade e agora leu inteiro), 
+              // reseta a memória e conta como a primeira leitura deste novo código.
+              lastCodeRef.current = codigoDecodificado;
+              matchCountRef.current = 1;
+            }
 
-            // Aguarda 1 segundo para o usuário ver que leu, e já envia a resposta e fecha
-            setTimeout(() => {
-              onSucesso(codigoDecodificado)
-            }, 1000)
+            // 4. SÓ CONFIRMA SE LER A MESMA COISA 2 VEZES SEGUIDAS
+            if (matchCountRef.current >= 2) {
+              isProcessingRef.current = true; // Trava o leitor
+              
+              // Vibração de sucesso (dupla)
+              if (navigator.vibrate) navigator.vibrate([100, 50, 100])
+              
+              // Atualiza a tela para mostrar o sucesso
+              setCodigoCapturado(codigoDecodificado)
+              setStatus('lido')
+
+              // Aguarda 1 segundo para o usuário ver que leu, e já envia a resposta e fecha
+              setTimeout(() => {
+                onSucesso(codigoDecodificado)
+              }, 1000)
+            }
           },
           () => {} // Ignora erros de frame vazio em silêncio
         )
