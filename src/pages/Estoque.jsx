@@ -149,9 +149,9 @@ function ProdutoItem({ produto }) {
 
                   <div className="flex items-center gap-6">
                     <div className="text-right">
-                      <p className="text-xs text-gray-400">Custo Un.</p>
-                      <p className="text-sm font-bold text-red-500 flex items-center gap-1">
-                        <DollarSign size={12} /> {Number(lote.preco_custo).toFixed(2)}
+                      <p className="text-xs text-gray-400">Valor Venda</p>
+                      <p className="text-sm font-bold text-green-600 flex items-center gap-1">
+                        <DollarSign size={12} /> {Number(produto.preco_venda).toFixed(2)}
                       </p>
                     </div>
                     <div className="text-center bg-gray-100 px-3 py-1 rounded-md">
@@ -164,6 +164,43 @@ function ProdutoItem({ produto }) {
               ))}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Mini-componente para gerenciar a "gaveta" das MARCAS (Recolhido por Padrão)
+function MarcaItem({ marcaNome, produtos }) {
+  const [expandido, setExpandido] = useState(false)
+
+  return (
+    <div className="relative border-b border-gray-100 last:border-0 pb-4 mb-4 last:mb-0 last:pb-0">
+      {/* INDICADOR DE MARCA (Clicável) */}
+      <div 
+        onClick={() => setExpandido(!expandido)}
+        className="flex items-center gap-3 mb-2 cursor-pointer hover:bg-gray-50 p-2 -ml-2 rounded-xl transition-colors select-none"
+      >
+        <div className="w-1.5 h-6 bg-blue-500 rounded-full"></div>
+        <h3 className="text-blue-600 font-bold text-xl tracking-tight">{marcaNome}</h3>
+        <div className="text-blue-500 flex items-center gap-2">
+          {expandido ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+        </div>
+        
+        {/* Pílula informativa mostrando a quantidade de itens na marca (só aparece se estiver fechado) */}
+        {!expandido && (
+          <span className="text-xs font-bold text-blue-400 bg-blue-50 px-2 py-1 rounded-lg ml-2">
+            {produtos.length} {produtos.length === 1 ? 'item' : 'itens'}
+          </span>
+        )}
+      </div>
+      
+      {/* LISTA DE PRODUTOS DA MARCA (Expansível) */}
+      {expandido && (
+        <div className="pl-0 md:pl-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
+          {produtos.map(p => (
+            <ProdutoItem key={p.id} produto={p} />
+          ))}
         </div>
       )}
     </div>
@@ -212,7 +249,6 @@ export default function Estoque() {
               
               return { ...p, lotesValidos, estoqueReal }
             })
-            // Foi removido o .filter(p => p.estoqueReal > 0) para exibir os zerados
 
             // Se houver qualquer produto cadastrado na marca, ela será mostrada
             if (produtosValidos.length > 0) {
@@ -266,21 +302,10 @@ export default function Estoque() {
                 <h2 className="text-white font-bold text-xl uppercase tracking-widest">{setorNome}</h2>
               </div>
 
-              <div className="p-5 md:p-8 space-y-8">
+              {/* Ajustei o padding e o espaço interno já que as marcas agora ficam recolhidas */}
+              <div className="p-5 md:p-8 space-y-2">
                 {Object.entries(marcas).map(([marcaNome, produtos]) => (
-                  <div key={marcaNome} className="relative">
-                    
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-1.5 h-6 bg-blue-500 rounded-full"></div>
-                      <h3 className="text-blue-600 font-bold text-xl tracking-tight">{marcaNome}</h3>
-                    </div>
-                    
-                    <div className="pl-0 md:pl-4">
-                      {produtos.map(p => (
-                        <ProdutoItem key={p.id} produto={p} />
-                      ))}
-                    </div>
-                  </div>
+                  <MarcaItem key={marcaNome} marcaNome={marcaNome} produtos={produtos} />
                 ))}
               </div>
             </div>
