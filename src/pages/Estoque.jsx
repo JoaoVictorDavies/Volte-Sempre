@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera, AlertCircle } from 'lucide-react'
-import LeitorCamera from '../components/LeitorCamera' 
+import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera, AlertCircle, Image as ImageIcon } from 'lucide-react'
+import LeitorCamera from '../components/LeitorCamera'
+import UploadFotoProduto from '../components/UploadFotoProduto' // ← Nosso novo componente!
 
 // Mini-componente para gerenciar a "gaveta" de lotes e a exibição de cada produto
 function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
   const [expandido, setExpandido] = useState(false)
   
+  // Estado para a Foto do Produto
+  const [urlImagem, setUrlImagem] = useState(produto.imagem_url)
+
   // Estados para a edição do nome do produto
   const [displayNome, setDisplayNome] = useState(produto.nome)
   const [isEditing, setIsEditing] = useState(false)
@@ -176,47 +180,64 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
         </div>
       </div>
 
-      {/* GAVETA DE LOTES (Expansível) */}
+      {/* GAVETA EXPANDIDA (Foto + Lotes) */}
       {expandido && (
-        <div className="bg-[#F9F9FB] border-t border-gray-100 p-4">
-          <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-            <Package size={14} /> Detalhamento de Lotes (Fila)
-          </h4>
+        <div className="bg-[#F9F9FB] border-t border-gray-100 p-5 flex flex-col md:flex-row gap-8">
           
-          {produto.lotesValidos.length === 0 ? (
-            <p className="text-sm text-gray-500 italic">Nenhum lote com saldo disponível no momento.</p>
-          ) : (
-            <div className="space-y-2">
-              {produto.lotesValidos.map((lote, index) => (
-                <div key={lote.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                  
-                  <div className="flex items-center gap-4">
-                    <div className={`w-2 h-8 rounded-full ${lote.status === 'ativo' ? 'bg-green-400' : 'bg-orange-400'}`} title={`Status: ${lote.status}`}></div>
-                    <div>
-                      <p className="text-sm font-bold text-gray-700">Lote {index + 1} <span className="text-xs font-normal text-gray-400 ml-1">({lote.status})</span></p>
-                      <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                        <Calendar size={12} /> {new Date(lote.criado_em).toLocaleDateString('pt-BR')}
-                      </p>
-                    </div>
-                  </div>
+          {/* COLUNA ESQUERDA: FOTO */}
+          <div className="flex flex-col items-start shrink-0">
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <ImageIcon size={14} /> Foto
+            </h4>
+            <UploadFotoProduto 
+              produtoId={produto.id}
+              urlAtual={urlImagem}
+              onUploadConcluido={(novaUrl) => setUrlImagem(novaUrl)} // Atualiza a foto na tela instantaneamente
+            />
+          </div>
 
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <p className="text-xs text-gray-400">Valor Venda</p>
-                      <p className="text-sm font-bold text-green-600 flex items-center gap-1">
-                        <DollarSign size={12} /> {Number(produto.preco_venda).toFixed(2)}
-                      </p>
+          {/* COLUNA DIREITA: LOTES */}
+          <div className="flex-1 flex flex-col">
+            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+              <Package size={14} /> Detalhamento de Lotes (Fila)
+            </h4>
+            
+            {produto.lotesValidos.length === 0 ? (
+              <p className="text-sm text-gray-500 italic">Nenhum lote com saldo disponível no momento.</p>
+            ) : (
+              <div className="space-y-2">
+                {produto.lotesValidos.map((lote, index) => (
+                  <div key={lote.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                    
+                    <div className="flex items-center gap-4">
+                      <div className={`w-2 h-8 rounded-full ${lote.status === 'ativo' ? 'bg-green-400' : 'bg-orange-400'}`} title={`Status: ${lote.status}`}></div>
+                      <div>
+                        <p className="text-sm font-bold text-gray-700">Lote {index + 1} <span className="text-xs font-normal text-gray-400 ml-1">({lote.status})</span></p>
+                        <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                          <Calendar size={12} /> {new Date(lote.criado_em).toLocaleDateString('pt-BR')}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-center bg-gray-100 px-3 py-1 rounded-md">
-                      <p className="text-xs text-gray-400">Restam</p>
-                      <p className="text-sm font-bold text-gray-800">{lote.quantidade_atual} un.</p>
-                    </div>
-                  </div>
 
-                </div>
-              ))}
-            </div>
-          )}
+                    <div className="flex items-center gap-6">
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">Valor Venda</p>
+                        <p className="text-sm font-bold text-green-600 flex items-center gap-1">
+                          <DollarSign size={12} /> {Number(produto.preco_venda).toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="text-center bg-gray-100 px-3 py-1 rounded-md">
+                        <p className="text-xs text-gray-400">Restam</p>
+                        <p className="text-sm font-bold text-gray-800">{lote.quantidade_atual} un.</p>
+                      </div>
+                    </div>
+
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
         </div>
       )}
     </div>
