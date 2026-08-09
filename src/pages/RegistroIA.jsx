@@ -242,7 +242,7 @@ export default function CadastroIA() {
           <ArrowLeft size={20} />
         </button>
         <span className="font-bold text-sm tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-600 to-purple-600 flex items-center gap-1.5">
-          <Sparkles size={16} /> Cadastro I.A.
+          <Sparkles size={16} /> Registro I.A.
         </span>
         <div className="w-9" />
       </div>

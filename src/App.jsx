@@ -7,7 +7,7 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
-import CadastroIA from './pages/CadastroIA' // ← Importação da IA adicionada aqui!
+import RegistroIA from './pages/RegistroIA' // ← Importação da IA adicionada aqui!
 import OrganizacaoCatalogo from './pages/OrganizacaoCatalogo'
 import Estoque from './pages/Estoque'
 import Financeiro from './pages/Financeiro'
@@ -94,7 +94,7 @@ export default function App() {
           {/* Rotas do Admin */}
           <Route path="/admin-home" element={<AdminHome />} />
           <Route path="/cadastro-produto" element={<CadastroProduto />} />
-          <Route path="/cadastro-ia" element={<CadastroIA />} /> {/* ← Rota da IA adicionada aqui! */}
+          <Route path="/registro-ia" element={<RegistroIA />} /> {/* ← Rota da IA adicionada aqui! */}
           <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
           <Route path="/estoque" element={<Estoque />} />
           <Route path="/financeiro" element={<Financeiro />} />
