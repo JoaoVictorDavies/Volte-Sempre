@@ -7,6 +7,7 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
+import CadastroIA from './pages/CadastroIA' // ← Novo componente de IA importado aqui
 import OrganizacaoCatalogo from './pages/OrganizacaoCatalogo'
 import Estoque from './pages/Estoque'
 import Financeiro from './pages/Financeiro'
@@ -14,7 +15,7 @@ import TesteImpressora from './pages/TesteImpressora'
 import Equipe from './pages/Equipe'
 import CaixaHome from './pages/CaixaHome'
 import Pdv from './pages/Pdv'
-import InstalacaoBanner from './components/InstalacaoBanner' // ← Importado aqui
+import InstalacaoBanner from './components/InstalacaoBanner' 
 
 export default function App() {
   // Verifica na memória do celular/PC se a pessoa já colocou a senha global antes
@@ -93,6 +94,7 @@ export default function App() {
           {/* Rotas do Admin */}
           <Route path="/admin-home" element={<AdminHome />} />
           <Route path="/cadastro-produto" element={<CadastroProduto />} />
+          <Route path="/cadastro-ia" element={<CadastroIA />} /> {/* ← Nova Rota da IA! */}
           <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
           <Route path="/estoque" element={<Estoque />} />
           <Route path="/financeiro" element={<Financeiro />} />

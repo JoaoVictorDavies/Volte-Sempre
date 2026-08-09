@@ -55,6 +55,13 @@ const ChartIcon = () => (
   </svg>
 )
 
+// Novo SVG para Inteligência Artificial
+const SparklesIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.29 1.29L3 12l5.8 1.9a2 2 0 0 1 1.29 1.29L12 21l1.9-5.8a2 2 0 0 1 1.29-1.29L21 12l-5.8-1.9a2 2 0 0 1-1.29-1.29Z"/>
+  </svg>
+)
+
 export default function AdminHome() {
   return (
     <div className="min-h-screen bg-[#F5F5F7] px-4 py-12">
@@ -151,6 +158,35 @@ export default function AdminHome() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
+            {/* NOVO CARD: CADASTRO COM IA */}
+            <Link
+              to="/cadastro-ia"
+              className="group flex flex-col justify-between bg-white rounded-3xl p-8 transition-all duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500"
+              style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
+              aria-label="Ir para Cadastro Inteligente"
+            >
+              <div>
+                <div className="w-10 h-10 rounded-2xl bg-fuchsia-50 flex items-center justify-center text-fuchsia-500 mb-5">
+                  <SparklesIcon />
+                </div>
+                <h3
+                  className="text-lg font-semibold text-[#1D1D1F] leading-snug"
+                  style={{ letterSpacing: '-0.01em' }}
+                >
+                  Cadastro Inteligente
+                  <span className="ml-2 text-xs font-medium text-fuchsia-500 bg-fuchsia-50 px-2 py-0.5 rounded-full align-middle">
+                    I.A.
+                  </span>
+                </h3>
+                <p className="text-[#86868B] mt-2 text-sm leading-relaxed">
+                  Fotografe o rótulo da embalagem e deixe a inteligência artificial ler os textos e extrair os dados.
+                </p>
+              </div>
+              <div className="mt-6 flex items-center text-fuchsia-500 text-sm font-medium gap-1 transition-all duration-300 group-hover:gap-2">
+                Acessar <ChevronRightIcon />
+              </div>
+            </Link>
+
             {/* Card — Cadastro Rápido */}
             <Link
               to="/cadastro-produto"
@@ -168,7 +204,7 @@ export default function AdminHome() {
                 >
                   Cadastro Rápido
                   <span className="ml-2 text-xs font-medium text-blue-400 bg-blue-50 px-2 py-0.5 rounded-full align-middle">
-                    Caixa
+                    Manual
                   </span>
                 </h3>
                 <p className="text-[#86868B] mt-2 text-sm leading-relaxed">
