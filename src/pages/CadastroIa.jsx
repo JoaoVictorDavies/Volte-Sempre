@@ -350,7 +350,7 @@ export default function CadastroIA() {
         </AnimatePresence>
       </div>
 
-      {/* MODAL DA CÂMERA DO CÓDIGO DE BARRAS */}
+      {/* MODAL DA CÂMERA DO CÓDIGO DE BARRAS ... */}
       {cameraBarcodeAtiva && (
         <div className="fixed inset-0 z-[100] bg-black">
           <LeitorCamera onSucesso={handleBarcodeSucesso} onFechar={() => setCameraBarcodeAtiva(false)} />
