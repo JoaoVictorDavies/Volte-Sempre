@@ -160,10 +160,10 @@ export default function AdminHome() {
 
             {/* NOVO CARD: CADASTRO COM IA */}
             <Link
-              to="/cadastro-ia"
+              to="/registro-ia"
               className="group flex flex-col justify-between bg-white rounded-3xl p-8 transition-all duration-300 ease-in-out hover:scale-[1.02] hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500"
               style={{ boxShadow: '0 2px 20px rgba(0,0,0,0.06)' }}
-              aria-label="Ir para Cadastro Inteligente"
+              aria-label="Ir para Registro Inteligente"
             >
               <div>
                 <div className="w-10 h-10 rounded-2xl bg-fuchsia-50 flex items-center justify-center text-fuchsia-500 mb-5">
@@ -173,7 +173,7 @@ export default function AdminHome() {
                   className="text-lg font-semibold text-[#1D1D1F] leading-snug"
                   style={{ letterSpacing: '-0.01em' }}
                 >
-                  Cadastro Inteligente
+                  Registro Inteligente
                   <span className="ml-2 text-xs font-medium text-fuchsia-500 bg-fuchsia-50 px-2 py-0.5 rounded-full align-middle">
                     I.A.
                   </span>
