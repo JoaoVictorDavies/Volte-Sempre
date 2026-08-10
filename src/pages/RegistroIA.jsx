@@ -95,9 +95,8 @@ export default function CadastroIA() {
     setCarregando(true)
 
     try {
-      // DIAGNÓSTICO 1: Chave da API existe?
       if (!apiKey || apiKey === 'undefined') {
-        alert("DIAGNÓSTICO 1 (FALHA): A chave VITE_GEMINI_API_KEY não foi encontrada no seu projeto (.env). A requisição nem saiu do seu computador.")
+        alert("DIAGNÓSTICO 1 (FALHA): A chave VITE_GEMINI_API_KEY não foi encontrada.")
         throw new Error("Sem API Key")
       }
 
@@ -108,7 +107,7 @@ export default function CadastroIA() {
       try {
         compressedFile = await imageCompression(file, options)
       } catch (err) {
-        alert("DIAGNÓSTICO 2 (FALHA): Erro ao tentar comprimir a imagem no navegador. Detalhe: " + err.message)
+        alert("DIAGNÓSTICO 2 (FALHA): Erro ao tentar comprimir a imagem. Detalhe: " + err.message)
         throw err
       }
       
@@ -133,7 +132,10 @@ export default function CadastroIA() {
       }
 
       const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+      
+      // MODELO ATUALIZADO AQUI
+      console.log("Iniciando modelo gemini-1.5-flash...")
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
       
       setStatusIA('Enviando para a Inteligência Artificial...')
       const prompt = `
@@ -147,14 +149,17 @@ export default function CadastroIA() {
 
       let result;
       try {
+        console.log("Fazendo requisição para a API do Google...")
         result = await model.generateContent([prompt, imagePart])
       } catch (err) {
-        alert("DIAGNÓSTICO 4 (FALHA NA API DO GOOGLE): Ocorreu um erro na requisição para o Gemini. Pode ser chave inválida, limite de uso atingido ou bloqueio de rede (CORS).\n\nMensagem do Google: " + err.message)
+        alert("DIAGNÓSTICO 4 (FALHA NA API DO GOOGLE): Ocorreu um erro na requisição para o Gemini.\n\nMensagem do Google: " + err.message)
+        console.error("Erro completo do Gemini:", err)
         throw err
       }
       
       setStatusIA('Lendo resposta...')
       const responseText = result.response.text()
+      console.log("Resposta bruta da IA:", responseText)
 
       // Regex para garantir que só vamos pegar o JSON
       const jsonMatch = responseText.match(/\{[\s\S]*\}/)
@@ -184,21 +189,20 @@ export default function CadastroIA() {
             marcaId: matchedMarcaId
           }))
         } catch (err) {
-          alert(`DIAGNÓSTICO 5 (JSON INVÁLIDO): A IA respondeu, mas falhou ao tentar transformar a resposta em JSON. Erro: ${err.message}\n\nResposta recebida da IA:\n${responseText}`)
+          alert(`DIAGNÓSTICO 5 (JSON INVÁLIDO): A IA respondeu, mas falhou ao tentar transformar a resposta em JSON. Erro: ${err.message}`)
           throw err
         }
       } else {
-        alert(`DIAGNÓSTICO 6 (SEM JSON): A IA respondeu, mas não encontrei um JSON na resposta.\n\nResposta recebida da IA:\n${responseText}`)
+        alert(`DIAGNÓSTICO 6 (SEM JSON): A IA não retornou um JSON.\n\nResposta: ${responseText}`)
         throw new Error("Formato de resposta da IA inválido.")
       }
 
     } catch (error) {
       console.error("Erro final capturado na IA:", error)
-      // Removemos o alerta genérico daqui, pois os alertas específicos acima já farão o trabalho.
     } finally {
       setCarregando(false)
       setStatusIA('')
-      setEtapa(3) // Sempre avança para a revisão, com ou sem ajuda da IA
+      setEtapa(3) 
       if (cameraFotoRef.current) cameraFotoRef.current.value = ''
     }
   }
@@ -217,7 +221,6 @@ export default function CadastroIA() {
       let imageUrlFinal = null
       let fileName = null
 
-      // 1. Upload da Imagem
       if (dados.arquivoFotoOriginal) {
         setStatusIA('Enviando foto para a nuvem...')
         fileName = `ia_${Date.now()}.jpg`
@@ -232,7 +235,6 @@ export default function CadastroIA() {
 
       setStatusIA('Registrando no banco de dados...')
       
-      // 2. Insere o Produto
       const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
         nome: dados.nome,
         codigo_barras: dados.codigoBarras || null,
@@ -249,7 +251,6 @@ export default function CadastroIA() {
         throw erroProd
       }
 
-      // 3. Insere o Lote de Estoque
       const { error: erroLote } = await supabase.from('estoque_lotes').insert([{
         produto_id: novoProduto.id,
         quantidade_inicial: parseInt(dados.estoque, 10) || 0,
@@ -259,10 +260,8 @@ export default function CadastroIA() {
       }])
 
       if (erroLote) {
-        // Rollback básico caso o lote falhe, para não deixar dados órfãos
         await supabase.from('produtos').delete().match({ id: novoProduto.id });
         if (fileName) await supabase.storage.from('produtos').remove([fileName]);
-        
         alert("ERRO SUPABASE (Insert Lote/Estoque): " + erroLote.message)
         throw erroLote
       }
