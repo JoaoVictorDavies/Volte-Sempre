@@ -9,23 +9,21 @@ import LeitorCamera from '../components/LeitorCamera'
 
 // Inicializa a IA do Google
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
-// Só inicializa o genAI se a chave existir para evitar quebrar logo de cara
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null
 
-// Função utilitária para converter textos/números com vírgula para formato de banco de dados (ex: "10,50" -> 10.50)
+// Funções utilitárias
 const parseNumber = (value) => {
   if (!value) return 0
   const stringValue = String(value).replace(',', '.')
   return parseFloat(stringValue) || 0
 }
 
-// Função utilitária para normalizar strings (tirar acentos, deixar minúsculo)
 const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : ''
 
-export default function CadastroIA() {
+export default function RegistroIA() {
   const navigate = useNavigate()
 
-  // Banco de Dados
+  // Banco de Dados (Listas da Loja)
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
   const [marcasDoBanco, setMarcasDoBanco] = useState([])
 
@@ -52,7 +50,7 @@ export default function CadastroIA() {
     fotoPreview: null 
   })
 
-  // Carrega Setores e Marcas
+  // Carrega Setores e Marcas na inicialização
   useEffect(() => {
     async function carregarEstrutura() {
       try {
@@ -61,33 +59,48 @@ export default function CadastroIA() {
           supabase.from('marcas').select('*')
         ])
         
-        if (resSetores.error) {
-            alert("ERRO SUPABASE (Setores): " + resSetores.error.message)
-        } else {
-            setSetoresDoBanco(resSetores.data || [])
-        }
-
-        if (resMarcas.error) {
-            alert("ERRO SUPABASE (Marcas): " + resMarcas.error.message)
-        } else {
-            setMarcasDoBanco(resMarcas.data || [])
-        }
+        if (resSetores.data) setSetoresDoBanco(resSetores.data)
+        if (resMarcas.data) setMarcasDoBanco(resMarcas.data)
       } catch (error) {
-        alert("ERRO GERAL AO CARREGAR BANCO: " + error.message)
-        console.error("Erro ao carregar dados do banco:", error)
+        console.error("Erro ao carregar banco:", error)
       }
     }
     carregarEstrutura()
   }, [])
 
-  // === PASSO 1: LER O CÓDIGO DE BARRAS ===
-  const handleBarcodeSucesso = (codigo) => {
-    setDados(prev => ({ ...prev, codigoBarras: codigo }))
+  // === PASSO 1: LER E VALIDAR O CÓDIGO DE BARRAS ===
+  const handleBarcodeSucesso = async (codigo) => {
     setCameraBarcodeAtiva(false)
-    setEtapa(2)
+    setCarregando(true)
+    setStatusIA('Verificando código no sistema...')
+
+    try {
+      // Blindagem: Verifica se já existe para não gastar API da IA à toa
+      const { data: produtoExistente } = await supabase
+        .from('produtos')
+        .select('nome')
+        .eq('codigo_barras', codigo)
+        .maybeSingle()
+
+      if (produtoExistente) {
+        alert(`O produto "${produtoExistente.nome}" já está cadastrado com este código! Vá para a tela de Estoque se quiser adicionar mais unidades.`)
+        return
+      }
+
+      setDados(prev => ({ ...prev, codigoBarras: codigo }))
+      setEtapa(2)
+    } catch (error) {
+      console.error("Erro ao checar código:", error)
+      // Se falhar a checagem, avança assim mesmo para não travar o usuário
+      setDados(prev => ({ ...prev, codigoBarras: codigo }))
+      setEtapa(2)
+    } finally {
+      setCarregando(false)
+      setStatusIA('')
+    }
   }
 
-  // === PASSO 2: TIRAR A FOTO E MANDAR PRA I.A. ===
+  // === PASSO 2: FOTO E INTELIGÊNCIA ARTIFICIAL ===
   const handleCapturarFoto = async (event) => {
     const file = event.target.files[0]
     if (!file) return
@@ -95,21 +108,12 @@ export default function CadastroIA() {
     setCarregando(true)
 
     try {
-      if (!apiKey || apiKey === 'undefined') {
-        alert("DIAGNÓSTICO 1 (FALHA): A chave VITE_GEMINI_API_KEY não foi encontrada.")
-        throw new Error("Sem API Key")
-      }
+      if (!apiKey || apiKey === 'undefined') throw new Error("Chave da API ausente")
 
       setStatusIA('Comprimindo imagem...')
-      const options = { maxSizeMB: 0.2, maxWidthOrHeight: 1200, useWebWorker: true, fileType: 'image/jpeg' }
-      let compressedFile;
-      
-      try {
-        compressedFile = await imageCompression(file, options)
-      } catch (err) {
-        alert("DIAGNÓSTICO 2 (FALHA): Erro ao tentar comprimir a imagem. Detalhe: " + err.message)
-        throw err
-      }
+      // Compressão extrema (800px e max 100kb) para economia de dados e velocidade
+      const options = { maxSizeMB: 0.1, maxWidthOrHeight: 800, useWebWorker: true, fileType: 'image/jpeg' }
+      const compressedFile = await imageCompression(file, options)
       
       setDados(prev => ({ 
         ...prev, 
@@ -117,98 +121,87 @@ export default function CadastroIA() {
         fotoPreview: URL.createObjectURL(compressedFile)
       }))
 
-      setStatusIA('Convertendo imagem para a IA...')
-      let base64Data;
-      try {
-        base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader()
-          reader.readAsDataURL(compressedFile)
-          reader.onloadend = () => resolve(reader.result.split(',')[1])
-          reader.onerror = (error) => reject(error)
-        })
-      } catch (err) {
-        alert("DIAGNÓSTICO 3 (FALHA): Erro ao converter a imagem para Base64. Detalhe: " + err.message)
-        throw err
-      }
+      setStatusIA('Convertendo para a IA...')
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.readAsDataURL(compressedFile)
+        reader.onloadend = () => resolve(reader.result.split(',')[1])
+        reader.onerror = (error) => reject(error)
+      })
 
       const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
       
-      // MODELO ATUALIZADO AQUI
-// MODELO ATUALIZADO AQUI
-      console.log("Iniciando modelo gemini-3.5-flash...")
-      const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" }) // ← A versão 3.5 é a atual
+      // Inicia a IA com o modelo 3.5
+      const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" })
       
-      setStatusIA('Enviando para a Inteligência Artificial...')
+      // Mapeia os nomes das marcas e setores ativos da loja
+      const listaSetores = setoresDoBanco.map(s => s.nome).join(', ') || 'Nenhum'
+      const listaMarcas = marcasDoBanco.map(m => m.nome).join(', ') || 'Nenhuma'
+
+      setStatusIA('Lendo rótulo e estruturando dados...')
+      
+      // Prompt Otimizado e Consciente do Banco de Dados
       const prompt = `
-        Você é um assistente de perfumaria experiente. Analise a imagem desta embalagem.
-        Extraia as informações e retorne APENAS um objeto JSON válido.
-        O JSON deve conter exatamente estas 3 chaves:
-        "nome": o nome completo do produto com volume (ex: Malbec Black Desodorante Colônia 100ml).
-        "marca": a marca principal do produto (ex: O Boticário, Natura, Eudora).
-        "setor": sugira o setor (ex: Perfumaria, Corpo e Banho, Maquiagem).
+        Você é um assistente de perfumaria experiente. Analise a imagem da embalagem.
+        Temos uma lista restrita no sistema.
+        Setores disponíveis na loja: [${listaSetores}].
+        Marcas disponíveis na loja: [${listaMarcas}].
+        
+        Sua tarefa:
+        1. Extraia o "nome" completo do produto com volume (ex: Malbec Black Desodorante Colônia 100ml).
+        2. Para a "marca", tente achar uma correspondência exata na lista de Marcas disponíveis. Se não achar, sugira o nome lido.
+        3. Para o "setor", tente achar uma correspondência exata na lista de Setores disponíveis. Se não achar, sugira um.
+        
+        RETORNE EXATAMENTE AS CHAVES: "nome", "marca", "setor".
       `
 
-      let result;
-      try {
-        console.log("Fazendo requisição para a API do Google...")
-        result = await model.generateContent([prompt, imagePart])
-      } catch (err) {
-        alert("DIAGNÓSTICO 4 (FALHA NA API DO GOOGLE): Ocorreu um erro na requisição para o Gemini.\n\nMensagem do Google: " + err.message)
-        console.error("Erro completo do Gemini:", err)
-        throw err
-      }
+      // Configuração forçando o modo JSON nativo (Economiza Tokens e evita erros de formatação)
+      const generationConfig = { responseMimeType: "application/json", temperature: 0.2 }
+
+      const result = await model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }, imagePart] }],
+        generationConfig
+      })
       
-      setStatusIA('Lendo resposta...')
+      setStatusIA('Organizando resposta...')
       const responseText = result.response.text()
-      console.log("Resposta bruta da IA:", responseText)
+      const jsonIA = JSON.parse(responseText) // Como forçamos JSON, podemos fazer o parse direto!
 
-      // Regex para garantir que só vamos pegar o JSON
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
-      
-      if (jsonMatch) {
-        try {
-          const jsonIA = JSON.parse(jsonMatch[0])
+      // Auto-Match Inteligente (Refinado)
+      let matchedSetorId = ''
+      let matchedMarcaId = ''
+      const iaSetor = normalize(jsonIA.setor)
+      const iaMarca = normalize(jsonIA.marca)
 
-          // Auto-Match Inteligente
-          let matchedSetorId = ''
-          let matchedMarcaId = ''
-          const iaSetor = normalize(jsonIA.setor)
-          const iaMarca = normalize(jsonIA.marca)
-
-          const setorEncontrado = setoresDoBanco.find(s => normalize(s.nome).includes(iaSetor) || iaSetor.includes(normalize(s.nome)))
-          
-          if (setorEncontrado) {
-            matchedSetorId = setorEncontrado.id
-            const marcaEncontrada = marcasDoBanco.find(m => m.setor_id === matchedSetorId && (normalize(m.nome).includes(iaMarca) || iaMarca.includes(normalize(m.nome))))
-            if (marcaEncontrada) matchedMarcaId = marcaEncontrada.id
-          }
-
-          setDados(prev => ({
-            ...prev,
-            nome: jsonIA.nome || '',
-            setorId: matchedSetorId,
-            marcaId: matchedMarcaId
-          }))
-        } catch (err) {
-          alert(`DIAGNÓSTICO 5 (JSON INVÁLIDO): A IA respondeu, mas falhou ao tentar transformar a resposta em JSON. Erro: ${err.message}`)
-          throw err
-        }
-      } else {
-        alert(`DIAGNÓSTICO 6 (SEM JSON): A IA não retornou um JSON.\n\nResposta: ${responseText}`)
-        throw new Error("Formato de resposta da IA inválido.")
+      const setorEncontrado = setoresDoBanco.find(s => normalize(s.nome) === iaSetor || normalize(s.nome).includes(iaSetor))
+      if (setorEncontrado) {
+        matchedSetorId = setorEncontrado.id
+        const marcaEncontrada = marcasDoBanco.find(m => m.setor_id === matchedSetorId && (normalize(m.nome) === iaMarca || normalize(m.nome).includes(iaMarca)))
+        if (marcaEncontrada) matchedMarcaId = marcaEncontrada.id
       }
+
+      setDados(prev => ({
+        ...prev,
+        nome: jsonIA.nome || '',
+        setorId: matchedSetorId,
+        marcaId: matchedMarcaId
+      }))
+
+      setEtapa(3) // Sucesso na leitura!
 
     } catch (error) {
-      console.error("Erro final capturado na IA:", error)
+      console.error("Erro no Processo da IA:", error)
+      // FALLBACK GRACIOSO: A IA falhou, mas não travamos o usuário.
+      alert("A Inteligência Artificial teve dificuldade em ler os dados (ou a conexão falhou). Não se preocupe, a foto foi salva. Preencha os campos manualmente na próxima tela.")
+      setEtapa(3) 
     } finally {
       setCarregando(false)
       setStatusIA('')
-      setEtapa(3) 
       if (cameraFotoRef.current) cameraFotoRef.current.value = ''
     }
   }
 
-  // === PASSO 3: FINALIZAR ===
+  // === PASSO 3: FINALIZAR (Salvar Produto e Lote) ===
   const finalizarCadastro = async () => {
     if (!dados.nome || dados.estoque === '' || dados.precoVenda === '' || !dados.setorId || !dados.marcaId) {
       alert("Atenção! Verifique se Nome, Setor, Marca, Estoque e Preço de Venda estão preenchidos.")
@@ -226,15 +219,14 @@ export default function CadastroIA() {
         setStatusIA('Enviando foto para a nuvem...')
         fileName = `ia_${Date.now()}.jpg`
         const { error: uploadError } = await supabase.storage.from('produtos').upload(fileName, dados.arquivoFotoOriginal)
-        if (uploadError) {
-            alert("ERRO SUPABASE (Upload Imagem): " + uploadError.message)
-            throw uploadError
-        }
+        
+        if (uploadError) throw uploadError
+        
         const { data: publicData } = supabase.storage.from('produtos').getPublicUrl(fileName)
         imageUrlFinal = publicData.publicUrl
       }
 
-      setStatusIA('Registrando no banco de dados...')
+      setStatusIA('Registrando produto...')
       
       const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
         nome: dados.nome,
@@ -247,11 +239,9 @@ export default function CadastroIA() {
         tipo: 'solo'
       }]).select().single()
 
-      if (erroProd) {
-        alert("ERRO SUPABASE (Insert Produto): " + erroProd.message)
-        throw erroProd
-      }
+      if (erroProd) throw erroProd
 
+      setStatusIA('Abrindo lote de estoque...')
       const { error: erroLote } = await supabase.from('estoque_lotes').insert([{
         produto_id: novoProduto.id,
         quantidade_inicial: parseInt(dados.estoque, 10) || 0,
@@ -261,16 +251,16 @@ export default function CadastroIA() {
       }])
 
       if (erroLote) {
-        await supabase.from('produtos').delete().match({ id: novoProduto.id });
-        if (fileName) await supabase.storage.from('produtos').remove([fileName]);
-        alert("ERRO SUPABASE (Insert Lote/Estoque): " + erroLote.message)
+        // Rollback se falhar o lote
+        await supabase.from('produtos').delete().match({ id: novoProduto.id })
+        if (fileName) await supabase.storage.from('produtos').remove([fileName])
         throw erroLote
       }
 
       setSucesso(true)
     } catch (error) {
       console.error(error)
-      alert('Resumo do Erro ao cadastrar: ' + error.message)
+      alert('Houve um erro ao tentar salvar no banco de dados: ' + error.message)
     } finally {
       setCarregando(false)
       setStatusIA('')
@@ -279,6 +269,7 @@ export default function CadastroIA() {
 
   const marcasDisponiveis = marcasDoBanco.filter(m => m.setor_id === dados.setorId)
 
+  // Telas condicionais de Carregamento e Sucesso
   if (sucesso) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center px-4 py-12">
@@ -318,6 +309,7 @@ export default function CadastroIA() {
 
   return (
     <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10 relative">
+      {/* HEADER */}
       <div className="w-full max-w-md mb-8 flex justify-between items-center px-2">
         <button onClick={() => navigate('/admin-home')} disabled={carregando} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50">
           <ArrowLeft size={20} />
@@ -345,7 +337,7 @@ export default function CadastroIA() {
               </button>
               
               <button onClick={() => setEtapa(2)} className="mt-6 text-sm text-gray-400 font-bold hover:text-gray-600 transition-colors underline-offset-4 hover:underline">
-                Pular esta etapa
+                Pular esta etapa (Sem Código)
               </button>
             </motion.div>
           )}
@@ -366,19 +358,18 @@ export default function CadastroIA() {
               </button>
 
               <button onClick={() => setEtapa(1)} className="mt-6 text-sm text-gray-400 font-bold flex items-center justify-center gap-1 mx-auto hover:text-gray-600 transition-colors">
-                <ArrowLeft size={16} /> Voltar
+                <ArrowLeft size={16} /> Voltar para Código
               </button>
             </motion.div>
           )}
 
-          {/* ETAPA 3 */}
+          {/* ETAPA 3: REVISÃO MANUA E ENVIO */}
           {etapa === 3 && (
             <motion.div key="e3" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 pb-8">
               <h2 className="text-xl font-bold text-gray-800 mb-5 tracking-tight flex items-center gap-2">
-                <Sparkles size={20} className="text-fuchsia-600" /> Revisão da IA
+                <Sparkles size={20} className="text-fuchsia-600" /> Revisão do Produto
               </h2>
 
-              {/* FOTO E NOME */}
               <div className="flex gap-4 mb-6 bg-gray-50 p-3 rounded-2xl border border-gray-100">
                 {dados.fotoPreview ? (
                   <img src={dados.fotoPreview} alt="Preview" className="w-20 h-20 object-cover rounded-xl shadow-sm" />
@@ -399,8 +390,6 @@ export default function CadastroIA() {
               </div>
 
               <div className="space-y-4 mb-8">
-                
-                {/* SETOR E MARCA */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5 w-full">
                     <label className="text-xs font-bold text-gray-400 uppercase tracking-wide pl-1">Setor</label>
@@ -428,7 +417,6 @@ export default function CadastroIA() {
                   </div>
                 </div>
 
-                {/* VALORES */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className="flex flex-col gap-1.5 w-full">
                     <label className="text-xs font-bold text-gray-400 uppercase tracking-wide pl-1">Qtd</label>
@@ -460,7 +448,6 @@ export default function CadastroIA() {
                     </div>
                   </div>
                 </div>
-
               </div>
 
               <button 
