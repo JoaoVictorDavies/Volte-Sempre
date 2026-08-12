@@ -134,8 +134,8 @@ export default function CadastroIA() {
       const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
       
       // MODELO ATUALIZADO AQUI
-      console.log("Iniciando modelo gemini-1.5-flash...")
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+      console.log("Iniciando modelo <gemini-2></gemini-2>.5-flash...")
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
       
       setStatusIA('Enviando para a Inteligência Artificial...')
       const prompt = `
