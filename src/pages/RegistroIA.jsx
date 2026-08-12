@@ -4,8 +4,9 @@ import { supabase } from '../services/supabase'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import imageCompression from 'browser-image-compression'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Barcode, Camera, CheckCircle, PackagePlus, Loader2, Sparkles, DollarSign, Hash } from 'lucide-react'
+import { ArrowLeft, Barcode, Camera, CheckCircle, PackagePlus, Loader2, Sparkles, DollarSign, Hash, Package, Boxes } from 'lucide-react'
 import LeitorCamera from '../components/LeitorCamera'
+import RegistroIALote from '../components/RegistroIALote' // ← Importando o componente de Lote
 
 // Inicializa a IA do Google
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
@@ -22,24 +23,27 @@ const parseNumber = (value) => {
 // Função utilitária para normalizar strings (tirar acentos, deixar minúsculo)
 const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : ''
 
-export default function CadastroIA() {
+export default function RegistroIA() {
   const navigate = useNavigate()
+
+  // MODO DE CADASTRO (null = Menu | 'individual' = 1 produto | 'lote' = Múltiplos)
+  const [modo, setModo] = useState(null) 
 
   // Banco de Dados
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
   const [marcasDoBanco, setMarcasDoBanco] = useState([])
 
-  // Controle de Fluxo
+  // Controle de Fluxo (Modo Individual)
   const [etapa, setEtapa] = useState(1) 
   const [carregando, setCarregando] = useState(false)
   const [statusIA, setStatusIA] = useState('') 
   const [sucesso, setSucesso] = useState(false)
 
-  // Leitor
+  // Leitor (Modo Individual)
   const [cameraBarcodeAtiva, setCameraBarcodeAtiva] = useState(false)
   const cameraFotoRef = useRef(null)
 
-  // Dados do Produto
+  // Dados do Produto (Modo Individual)
   const [dados, setDados] = useState({
     codigoBarras: '',
     nome: '',
@@ -134,7 +138,6 @@ export default function CadastroIA() {
       const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
       
       // MODELO ATUALIZADO AQUI
-// MODELO ATUALIZADO AQUI
       console.log("Iniciando modelo gemini-3.5-flash...")
       const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" }) // ← A versão 3.5 é a atual
       
@@ -279,6 +282,70 @@ export default function CadastroIA() {
 
   const marcasDisponiveis = marcasDoBanco.filter(m => m.setor_id === dados.setorId)
 
+  // =========================================================
+  // RENDERIZAÇÃO: MODO LOTE
+  // =========================================================
+  if (modo === 'lote') {
+    return <RegistroIALote onVoltar={() => setModo(null)} />
+  }
+
+  // =========================================================
+  // RENDERIZAÇÃO: MENU HUB (Escolha de Modo)
+  // =========================================================
+  if (modo === null) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10 relative">
+        <div className="w-full max-w-md mb-8 flex justify-between items-center px-2">
+          <button onClick={() => navigate('/admin-home')} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-gray-800 transition-colors">
+            <ArrowLeft size={20} />
+          </button>
+          <span className="font-bold text-sm tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-600 to-purple-600 flex items-center gap-1.5">
+            <Sparkles size={16} /> Registro I.A.
+          </span>
+          <div className="w-9" />
+        </div>
+
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md mt-4">
+          <h2 className="text-2xl font-bold text-[#1D1D1F] mb-2 tracking-tight px-2">Como deseja cadastrar?</h2>
+          <p className="text-[#86868B] text-sm mb-8 px-2">Escolha o formato ideal para a sua necessidade no momento.</p>
+
+          <div className="flex flex-col gap-4">
+            {/* Botão Individual */}
+            <button 
+              onClick={() => setModo('individual')}
+              className="group flex items-start gap-4 p-6 bg-white rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-fuchsia-200 transition-all text-left"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-fuchsia-50 flex items-center justify-center text-fuchsia-600 shrink-0 group-hover:scale-110 transition-transform">
+                <Package size={28} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 mb-1">Produto Único</h3>
+                <p className="text-sm text-gray-500 leading-relaxed">Cadastre um produto detalhadamente, vinculando o código de barras primeiro.</p>
+              </div>
+            </button>
+
+            {/* Botão Lote */}
+            <button 
+              onClick={() => setModo('lote')}
+              className="group flex items-start gap-4 p-6 bg-white rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-orange-200 transition-all text-left"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center text-orange-500 shrink-0 group-hover:scale-110 transition-transform">
+                <Boxes size={28} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 mb-1">Caixa / Lote</h3>
+                <p className="text-sm text-gray-500 leading-relaxed">Tire várias fotos em sequência e a IA lerá todos os produtos de uma vez.</p>
+              </div>
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    )
+  }
+
+  // =========================================================
+  // RENDERIZAÇÃO: MODO INDIVIDUAL (Seu Código Original Estável)
+  // =========================================================
   if (sucesso) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center px-4 py-12">
@@ -319,11 +386,12 @@ export default function CadastroIA() {
   return (
     <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10 relative">
       <div className="w-full max-w-md mb-8 flex justify-between items-center px-2">
-        <button onClick={() => navigate('/admin-home')} disabled={carregando} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50">
+        {/* Agora o voltar volta pro Hub (setModo(null)) em vez do admin-home */}
+        <button onClick={() => setModo(null)} disabled={carregando} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50">
           <ArrowLeft size={20} />
         </button>
         <span className="font-bold text-sm tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-600 to-purple-600 flex items-center gap-1.5">
-          <Sparkles size={16} /> Registro I.A.
+          <Sparkles size={16} /> Registro I.A. (Único)
         </span>
         <div className="w-9" />
       </div>
