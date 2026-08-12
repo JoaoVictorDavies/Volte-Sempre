@@ -134,8 +134,9 @@ export default function CadastroIA() {
       const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
       
       // MODELO ATUALIZADO AQUI
-      console.log("Iniciando modelo <gemini-2></gemini-2>.5-flash...")
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
+// MODELO ATUALIZADO AQUI
+      console.log("Iniciando modelo gemini-3.5-flash...")
+      const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" }) // ← A versão 3.5 é a atual
       
       setStatusIA('Enviando para a Inteligência Artificial...')
       const prompt = `
