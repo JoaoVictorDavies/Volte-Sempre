@@ -23,7 +23,7 @@ const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g
 export default function RegistroIA() {
   const navigate = useNavigate()
 
-  // Banco de Dados (Listas da Loja)
+  // Banco de Dados
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
   const [marcasDoBanco, setMarcasDoBanco] = useState([])
 
@@ -58,7 +58,6 @@ export default function RegistroIA() {
           supabase.from('setores').select('*'),
           supabase.from('marcas').select('*')
         ])
-        
         if (resSetores.data) setSetoresDoBanco(resSetores.data)
         if (resMarcas.data) setMarcasDoBanco(resMarcas.data)
       } catch (error) {
@@ -72,10 +71,9 @@ export default function RegistroIA() {
   const handleBarcodeSucesso = async (codigo) => {
     setCameraBarcodeAtiva(false)
     setCarregando(true)
-    setStatusIA('Verificando código no sistema...')
+    setStatusIA('Checando código...')
 
     try {
-      // Blindagem: Verifica se já existe para não gastar API da IA à toa
       const { data: produtoExistente } = await supabase
         .from('produtos')
         .select('nome')
@@ -83,24 +81,21 @@ export default function RegistroIA() {
         .maybeSingle()
 
       if (produtoExistente) {
-        alert(`O produto "${produtoExistente.nome}" já está cadastrado com este código! Vá para a tela de Estoque se quiser adicionar mais unidades.`)
+        alert(`O produto "${produtoExistente.nome}" já está cadastrado!`)
         return
       }
 
       setDados(prev => ({ ...prev, codigoBarras: codigo }))
       setEtapa(2)
     } catch (error) {
-      console.error("Erro ao checar código:", error)
-      // Se falhar a checagem, avança assim mesmo para não travar o usuário
       setDados(prev => ({ ...prev, codigoBarras: codigo }))
       setEtapa(2)
     } finally {
       setCarregando(false)
-      setStatusIA('')
     }
   }
 
-  // === PASSO 2: FOTO E INTELIGÊNCIA ARTIFICIAL ===
+  // === PASSO 2: FOTO E INTELIGÊNCIA ARTIFICIAL (OTIMIZADO) ===
   const handleCapturarFoto = async (event) => {
     const file = event.target.files[0]
     if (!file) return
@@ -108,11 +103,11 @@ export default function RegistroIA() {
     setCarregando(true)
 
     try {
-      if (!apiKey || apiKey === 'undefined') throw new Error("Chave da API ausente")
+      if (!genAI) throw new Error("API Key da IA não configurada.")
 
-      setStatusIA('Comprimindo imagem...')
-      // Compressão extrema (800px e max 100kb) para economia de dados e velocidade
-      const options = { maxSizeMB: 0.1, maxWidthOrHeight: 800, useWebWorker: true, fileType: 'image/jpeg' }
+      // 1. COMPRESSÃO AGRESSIVA (Foco em Velocidade: Max 600px e 50kb)
+      setStatusIA('Processando imagem...')
+      const options = { maxSizeMB: 0.05, maxWidthOrHeight: 600, useWebWorker: true, fileType: 'image/jpeg' }
       const compressedFile = await imageCompression(file, options)
       
       setDados(prev => ({ 
@@ -121,62 +116,46 @@ export default function RegistroIA() {
         fotoPreview: URL.createObjectURL(compressedFile)
       }))
 
-      setStatusIA('Convertendo para a IA...')
-      const base64Data = await new Promise((resolve, reject) => {
+      // 2. CONVERSÃO RÁPIDA
+      const base64Data = await new Promise((resolve) => {
         const reader = new FileReader()
         reader.readAsDataURL(compressedFile)
         reader.onloadend = () => resolve(reader.result.split(',')[1])
-        reader.onerror = (error) => reject(error)
       })
-
       const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
       
-      // Inicia a IA com o modelo 3.5
-      const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" })
+      // 3. CHAMADA DA IA (Modelo Flash Ultra-Rápido)
+      setStatusIA('Lendo embalagem...')
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
       
-      // Mapeia os nomes das marcas e setores ativos da loja
-      const listaSetores = setoresDoBanco.map(s => s.nome).join(', ') || 'Nenhum'
-      const listaMarcas = marcasDoBanco.map(m => m.nome).join(', ') || 'Nenhuma'
-
-      setStatusIA('Lendo rótulo e estruturando dados...')
-      
-      // Prompt Otimizado e Consciente do Banco de Dados
+      // Prompt Curto e Direto = Resposta Mais Rápida
       const prompt = `
-        Você é um assistente de perfumaria experiente. Analise a imagem da embalagem.
-        Temos uma lista restrita no sistema.
-        Setores disponíveis na loja: [${listaSetores}].
-        Marcas disponíveis na loja: [${listaMarcas}].
-        
-        Sua tarefa:
-        1. Extraia o "nome" completo do produto com volume (ex: Malbec Black Desodorante Colônia 100ml).
-        2. Para a "marca", tente achar uma correspondência exata na lista de Marcas disponíveis. Se não achar, sugira o nome lido.
-        3. Para o "setor", tente achar uma correspondência exata na lista de Setores disponíveis. Se não achar, sugira um.
-        
-        RETORNE EXATAMENTE AS CHAVES: "nome", "marca", "setor".
+        Analise a imagem deste produto de perfumaria/cosmético.
+        Retorne APENAS um objeto JSON com as seguintes chaves:
+        "nome": o nome completo junto com o volume (ex: Malbec 100ml).
+        "marca": a marca principal.
+        "setor": o setor (ex: Perfumaria, Maquiagem).
       `
 
-      // Configuração forçando o modo JSON nativo (Economiza Tokens e evita erros de formatação)
-      const generationConfig = { responseMimeType: "application/json", temperature: 0.2 }
-
-      const result = await model.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }, imagePart] }],
-        generationConfig
-      })
-      
-      setStatusIA('Organizando resposta...')
+      const result = await model.generateContent([prompt, imagePart])
       const responseText = result.response.text()
-      const jsonIA = JSON.parse(responseText) // Como forçamos JSON, podemos fazer o parse direto!
 
-      // Auto-Match Inteligente (Refinado)
+      // 4. PARSER DE JSON À PROVA DE BALAS
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) throw new Error("A IA não retornou um formato válido.")
+      
+      const jsonIA = JSON.parse(jsonMatch[0])
+
+      // 5. AUTO-MATCH SILENCIOSO
       let matchedSetorId = ''
       let matchedMarcaId = ''
       const iaSetor = normalize(jsonIA.setor)
       const iaMarca = normalize(jsonIA.marca)
 
-      const setorEncontrado = setoresDoBanco.find(s => normalize(s.nome) === iaSetor || normalize(s.nome).includes(iaSetor))
+      const setorEncontrado = setoresDoBanco.find(s => normalize(s.nome).includes(iaSetor) || iaSetor.includes(normalize(s.nome)))
       if (setorEncontrado) {
         matchedSetorId = setorEncontrado.id
-        const marcaEncontrada = marcasDoBanco.find(m => m.setor_id === matchedSetorId && (normalize(m.nome) === iaMarca || normalize(m.nome).includes(iaMarca)))
+        const marcaEncontrada = marcasDoBanco.find(m => m.setor_id === matchedSetorId && (normalize(m.nome).includes(iaMarca) || iaMarca.includes(normalize(m.nome))))
         if (marcaEncontrada) matchedMarcaId = marcaEncontrada.id
       }
 
@@ -187,16 +166,14 @@ export default function RegistroIA() {
         marcaId: matchedMarcaId
       }))
 
-      setEtapa(3) // Sucesso na leitura!
-
     } catch (error) {
-      console.error("Erro no Processo da IA:", error)
-      // FALLBACK GRACIOSO: A IA falhou, mas não travamos o usuário.
-      alert("A Inteligência Artificial teve dificuldade em ler os dados (ou a conexão falhou). Não se preocupe, a foto foi salva. Preencha os campos manualmente na próxima tela.")
-      setEtapa(3) 
+      console.error("Erro na leitura da foto:", error)
+      // O aviso agora é rápido e não trava a tela
+      alert("A leitura automática falhou, mas a foto foi salva. Por favor, preencha o nome manualmente.")
     } finally {
       setCarregando(false)
       setStatusIA('')
+      setEtapa(3) // Sempre vai para a tela de revisão, dando certo ou errado
       if (cameraFotoRef.current) cameraFotoRef.current.value = ''
     }
   }
@@ -209,24 +186,18 @@ export default function RegistroIA() {
     }
 
     setCarregando(true)
-    setStatusIA('Salvando produto no sistema...')
+    setStatusIA('Salvando...')
     
     try {
       let imageUrlFinal = null
-      let fileName = null
 
       if (dados.arquivoFotoOriginal) {
-        setStatusIA('Enviando foto para a nuvem...')
-        fileName = `ia_${Date.now()}.jpg`
+        const fileName = `ia_${Date.now()}.jpg`
         const { error: uploadError } = await supabase.storage.from('produtos').upload(fileName, dados.arquivoFotoOriginal)
-        
         if (uploadError) throw uploadError
-        
         const { data: publicData } = supabase.storage.from('produtos').getPublicUrl(fileName)
         imageUrlFinal = publicData.publicUrl
       }
-
-      setStatusIA('Registrando produto...')
       
       const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
         nome: dados.nome,
@@ -241,7 +212,6 @@ export default function RegistroIA() {
 
       if (erroProd) throw erroProd
 
-      setStatusIA('Abrindo lote de estoque...')
       const { error: erroLote } = await supabase.from('estoque_lotes').insert([{
         produto_id: novoProduto.id,
         quantidade_inicial: parseInt(dados.estoque, 10) || 0,
@@ -251,16 +221,14 @@ export default function RegistroIA() {
       }])
 
       if (erroLote) {
-        // Rollback se falhar o lote
         await supabase.from('produtos').delete().match({ id: novoProduto.id })
-        if (fileName) await supabase.storage.from('produtos').remove([fileName])
         throw erroLote
       }
 
       setSucesso(true)
     } catch (error) {
       console.error(error)
-      alert('Houve um erro ao tentar salvar no banco de dados: ' + error.message)
+      alert('Houve um erro ao tentar salvar: ' + error.message)
     } finally {
       setCarregando(false)
       setStatusIA('')
@@ -269,7 +237,7 @@ export default function RegistroIA() {
 
   const marcasDisponiveis = marcasDoBanco.filter(m => m.setor_id === dados.setorId)
 
-  // Telas condicionais de Carregamento e Sucesso
+  // Telas condicionais
   if (sucesso) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center px-4 py-12">
@@ -279,8 +247,8 @@ export default function RegistroIA() {
               <CheckCircle size={34} className="text-green-500" />
             </div>
           </div>
-          <h2 className="font-bold text-[#1D1D1F] text-2xl mb-2">Mágica Feita!</h2>
-          <p className="text-[#86868B] text-sm mb-10">Produto cadastrado e foto vinculada com sucesso.</p>
+          <h2 className="font-bold text-[#1D1D1F] text-2xl mb-2">Salvo com Sucesso!</h2>
+          <p className="text-[#86868B] text-sm mb-10">O produto já está disponível no sistema.</p>
           <div className="flex flex-col gap-3">
             <button onClick={() => navigate('/estoque')} className="w-full py-4 bg-[#1D1D1F] text-white font-bold rounded-2xl shadow-lg hover:bg-black transition-colors">
               Ver no Estoque
@@ -309,7 +277,6 @@ export default function RegistroIA() {
 
   return (
     <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10 relative">
-      {/* HEADER */}
       <div className="w-full max-w-md mb-8 flex justify-between items-center px-2">
         <button onClick={() => navigate('/admin-home')} disabled={carregando} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50">
           <ArrowLeft size={20} />
@@ -323,7 +290,6 @@ export default function RegistroIA() {
       <div className="w-full max-w-md">
         <AnimatePresence mode="wait">
 
-          {/* ETAPA 1 */}
           {etapa === 1 && (
             <motion.div key="e1" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 text-center">
               <div className="w-20 h-20 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 mx-auto mb-6 shadow-inner">
@@ -337,12 +303,11 @@ export default function RegistroIA() {
               </button>
               
               <button onClick={() => setEtapa(2)} className="mt-6 text-sm text-gray-400 font-bold hover:text-gray-600 transition-colors underline-offset-4 hover:underline">
-                Pular esta etapa (Sem Código)
+                Pular esta etapa
               </button>
             </motion.div>
           )}
 
-          {/* ETAPA 2 */}
           {etapa === 2 && (
             <motion.div key="e2" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 text-center">
               <div className="w-20 h-20 bg-fuchsia-50 rounded-2xl flex items-center justify-center text-fuchsia-600 mx-auto mb-6 shadow-inner">
@@ -358,12 +323,11 @@ export default function RegistroIA() {
               </button>
 
               <button onClick={() => setEtapa(1)} className="mt-6 text-sm text-gray-400 font-bold flex items-center justify-center gap-1 mx-auto hover:text-gray-600 transition-colors">
-                <ArrowLeft size={16} /> Voltar para Código
+                <ArrowLeft size={16} /> Voltar
               </button>
             </motion.div>
           )}
 
-          {/* ETAPA 3: REVISÃO MANUA E ENVIO */}
           {etapa === 3 && (
             <motion.div key="e3" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 pb-8">
               <h2 className="text-xl font-bold text-gray-800 mb-5 tracking-tight flex items-center gap-2">
