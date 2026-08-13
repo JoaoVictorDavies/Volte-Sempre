@@ -4,46 +4,56 @@ import { supabase } from '../services/supabase'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import imageCompression from 'browser-image-compression'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Barcode, Camera, CheckCircle, PackagePlus, Loader2, Sparkles, DollarSign, Hash, Package, Boxes } from 'lucide-react'
+import { ArrowLeft, Barcode, Camera, CheckCircle, PackagePlus, Loader2, Sparkles, DollarSign, Hash, Package, Boxes, Globe } from 'lucide-react'
 import LeitorCamera from '../components/LeitorCamera'
-import RegistroIALote from '../components/RegistroIALote' // ← Importando o componente de Lote
+import RegistroIALote from '../components/RegistroIALote'
 
-// Inicializa a IA do Google
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
-// Só inicializa o genAI se a chave existir para evitar quebrar logo de cara
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null
 
-// Função utilitária para converter textos/números com vírgula para formato de banco de dados (ex: "10,50" -> 10.50)
 const parseNumber = (value) => {
   if (!value) return 0
   const stringValue = String(value).replace(',', '.')
   return parseFloat(stringValue) || 0
 }
 
-// Função utilitária para normalizar strings (tirar acentos, deixar minúsculo)
 const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : ''
+
+// ==========================================
+// CONSULTA NA BASE MUNDIAL DE COSMÉTICOS
+// ==========================================
+const buscarProdutoNaInternet = async (codigo) => {
+  try {
+    const res = await fetch(`https://br.openbeautyfacts.org/api/v0/product/${codigo}.json`)
+    const data = await res.json()
+    if (data.status === 1 && data.product) {
+      return {
+        nome: data.product.product_name,
+        marca: data.product.brands,
+        fotoUrl: data.product.image_url
+      }
+    }
+  } catch (error) {
+    console.error("Erro ao buscar na internet:", error)
+  }
+  return null
+}
 
 export default function RegistroIA() {
   const navigate = useNavigate()
 
-  // MODO DE CADASTRO (null = Menu | 'individual' = 1 produto | 'lote' = Múltiplos)
   const [modo, setModo] = useState(null) 
-
-  // Banco de Dados
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
   const [marcasDoBanco, setMarcasDoBanco] = useState([])
 
-  // Controle de Fluxo (Modo Individual)
   const [etapa, setEtapa] = useState(1) 
   const [carregando, setCarregando] = useState(false)
   const [statusIA, setStatusIA] = useState('') 
   const [sucesso, setSucesso] = useState(false)
 
-  // Leitor (Modo Individual)
   const [cameraBarcodeAtiva, setCameraBarcodeAtiva] = useState(false)
   const cameraFotoRef = useRef(null)
 
-  // Dados do Produto (Modo Individual)
   const [dados, setDados] = useState({
     codigoBarras: '',
     nome: '',
@@ -53,10 +63,10 @@ export default function RegistroIA() {
     precoVenda: '',
     estoque: '',
     arquivoFotoOriginal: null,
-    fotoPreview: null 
+    fotoPreview: null,
+    fotoUrlExterna: null // Novo estado para guardar foto da internet
   })
 
-  // Carrega Setores e Marcas
   useEffect(() => {
     async function carregarEstrutura() {
       try {
@@ -64,34 +74,61 @@ export default function RegistroIA() {
           supabase.from('setores').select('*'),
           supabase.from('marcas').select('*')
         ])
-        
-        if (resSetores.error) {
-            alert("ERRO SUPABASE (Setores): " + resSetores.error.message)
-        } else {
-            setSetoresDoBanco(resSetores.data || [])
-        }
-
-        if (resMarcas.error) {
-            alert("ERRO SUPABASE (Marcas): " + resMarcas.error.message)
-        } else {
-            setMarcasDoBanco(resMarcas.data || [])
-        }
+        if (!resSetores.error) setSetoresDoBanco(resSetores.data || [])
+        if (!resMarcas.error) setMarcasDoBanco(resMarcas.data || [])
       } catch (error) {
-        alert("ERRO GERAL AO CARREGAR BANCO: " + error.message)
         console.error("Erro ao carregar dados do banco:", error)
       }
     }
     carregarEstrutura()
   }, [])
 
-  // === PASSO 1: LER O CÓDIGO DE BARRAS ===
-  const handleBarcodeSucesso = (codigo) => {
+  // === PASSO 1: LER O CÓDIGO DE BARRAS E BUSCAR NA INTERNET ===
+  const handleBarcodeSucesso = async (codigo) => {
     setDados(prev => ({ ...prev, codigoBarras: codigo }))
     setCameraBarcodeAtiva(false)
-    setEtapa(2)
+    
+    setCarregando(true)
+    setStatusIA('Procurando produto na base global...')
+
+    // Tenta buscar na internet primeiro!
+    const produtoExterno = await buscarProdutoNaInternet(codigo)
+
+    if (produtoExterno && produtoExterno.nome) {
+      // Achou! Vamos tentar casar a marca dele com o seu banco de dados
+      let matchedMarcaId = ''
+      let matchedSetorId = ''
+      const apiMarca = normalize(produtoExterno.marca)
+
+      if (apiMarca) {
+        const marcaEncontrada = marcasDoBanco.find(m => normalize(m.nome).includes(apiMarca) || apiMarca.includes(normalize(m.nome)))
+        if (marcaEncontrada) {
+          matchedMarcaId = marcaEncontrada.id
+          matchedSetorId = marcaEncontrada.setor_id
+        }
+      }
+
+      setDados(prev => ({
+        ...prev,
+        nome: produtoExterno.nome || '',
+        marcaId: matchedMarcaId,
+        setorId: matchedSetorId,
+        fotoUrlExterna: produtoExterno.fotoUrl,
+        fotoPreview: produtoExterno.fotoUrl
+      }))
+      
+      setCarregando(false)
+      setStatusIA('')
+      setEtapa(3) // Pula a foto e a I.A. direto pra revisão!
+    } else {
+      // Não achou na internet, vai pro fluxo normal da I.A. do Google (Foto)
+      setCarregando(false)
+      setStatusIA('')
+      setEtapa(2)
+    }
   }
 
-  // === PASSO 2: TIRAR A FOTO E MANDAR PRA I.A. ===
+  // === PASSO 2: TIRAR A FOTO E MANDAR PRA I.A. (FALLBACK) ===
   const handleCapturarFoto = async (event) => {
     const file = event.target.files[0]
     if (!file) return
@@ -99,47 +136,29 @@ export default function RegistroIA() {
     setCarregando(true)
 
     try {
-      if (!apiKey || apiKey === 'undefined') {
-        alert("DIAGNÓSTICO 1 (FALHA): A chave VITE_GEMINI_API_KEY não foi encontrada.")
-        throw new Error("Sem API Key")
-      }
+      if (!apiKey || apiKey === 'undefined') throw new Error("Sem API Key")
 
       setStatusIA('Comprimindo imagem...')
       const options = { maxSizeMB: 0.2, maxWidthOrHeight: 1200, useWebWorker: true, fileType: 'image/jpeg' }
-      let compressedFile;
-      
-      try {
-        compressedFile = await imageCompression(file, options)
-      } catch (err) {
-        alert("DIAGNÓSTICO 2 (FALHA): Erro ao tentar comprimir a imagem. Detalhe: " + err.message)
-        throw err
-      }
+      const compressedFile = await imageCompression(file, options)
       
       setDados(prev => ({ 
         ...prev, 
         arquivoFotoOriginal: compressedFile,
-        fotoPreview: URL.createObjectURL(compressedFile)
+        fotoPreview: URL.createObjectURL(compressedFile),
+        fotoUrlExterna: null // Limpa URL externa se estiver tirando foto nova
       }))
 
       setStatusIA('Convertendo imagem para a IA...')
-      let base64Data;
-      try {
-        base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader()
-          reader.readAsDataURL(compressedFile)
-          reader.onloadend = () => resolve(reader.result.split(',')[1])
-          reader.onerror = (error) => reject(error)
-        })
-      } catch (err) {
-        alert("DIAGNÓSTICO 3 (FALHA): Erro ao converter a imagem para Base64. Detalhe: " + err.message)
-        throw err
-      }
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.readAsDataURL(compressedFile)
+        reader.onloadend = () => resolve(reader.result.split(',')[1])
+        reader.onerror = (error) => reject(error)
+      })
 
       const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
-      
-      // MODELO ATUALIZADO AQUI
-      console.log("Iniciando modelo gemini-3.5-flash...")
-      const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" }) // ← A versão 3.5 é a atual
+      const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" }) 
       
       setStatusIA('Enviando para a Inteligência Artificial...')
       const prompt = `
@@ -151,58 +170,36 @@ export default function RegistroIA() {
         "setor": sugira o setor (ex: Perfumaria, Corpo e Banho, Maquiagem).
       `
 
-      let result;
-      try {
-        console.log("Fazendo requisição para a API do Google...")
-        result = await model.generateContent([prompt, imagePart])
-      } catch (err) {
-        alert("DIAGNÓSTICO 4 (FALHA NA API DO GOOGLE): Ocorreu um erro na requisição para o Gemini.\n\nMensagem do Google: " + err.message)
-        console.error("Erro completo do Gemini:", err)
-        throw err
-      }
-      
+      const result = await model.generateContent([prompt, imagePart])
       setStatusIA('Lendo resposta...')
       const responseText = result.response.text()
-      console.log("Resposta bruta da IA:", responseText)
-
-      // Regex para garantir que só vamos pegar o JSON
       const jsonMatch = responseText.match(/\{[\s\S]*\}/)
       
       if (jsonMatch) {
-        try {
-          const jsonIA = JSON.parse(jsonMatch[0])
+        const jsonIA = JSON.parse(jsonMatch[0])
+        let matchedSetorId = ''
+        let matchedMarcaId = ''
+        const iaSetor = normalize(jsonIA.setor)
+        const iaMarca = normalize(jsonIA.marca)
 
-          // Auto-Match Inteligente
-          let matchedSetorId = ''
-          let matchedMarcaId = ''
-          const iaSetor = normalize(jsonIA.setor)
-          const iaMarca = normalize(jsonIA.marca)
-
-          const setorEncontrado = setoresDoBanco.find(s => normalize(s.nome).includes(iaSetor) || iaSetor.includes(normalize(s.nome)))
-          
-          if (setorEncontrado) {
-            matchedSetorId = setorEncontrado.id
-            const marcaEncontrada = marcasDoBanco.find(m => m.setor_id === matchedSetorId && (normalize(m.nome).includes(iaMarca) || iaMarca.includes(normalize(m.nome))))
-            if (marcaEncontrada) matchedMarcaId = marcaEncontrada.id
-          }
-
-          setDados(prev => ({
-            ...prev,
-            nome: jsonIA.nome || '',
-            setorId: matchedSetorId,
-            marcaId: matchedMarcaId
-          }))
-        } catch (err) {
-          alert(`DIAGNÓSTICO 5 (JSON INVÁLIDO): A IA respondeu, mas falhou ao tentar transformar a resposta em JSON. Erro: ${err.message}`)
-          throw err
+        const setorEncontrado = setoresDoBanco.find(s => normalize(s.nome).includes(iaSetor) || iaSetor.includes(normalize(s.nome)))
+        if (setorEncontrado) {
+          matchedSetorId = setorEncontrado.id
+          const marcaEncontrada = marcasDoBanco.find(m => m.setor_id === matchedSetorId && (normalize(m.nome).includes(iaMarca) || iaMarca.includes(normalize(m.nome))))
+          if (marcaEncontrada) matchedMarcaId = marcaEncontrada.id
         }
+
+        setDados(prev => ({
+          ...prev,
+          nome: jsonIA.nome || '',
+          setorId: matchedSetorId,
+          marcaId: matchedMarcaId
+        }))
       } else {
-        alert(`DIAGNÓSTICO 6 (SEM JSON): A IA não retornou um JSON.\n\nResposta: ${responseText}`)
         throw new Error("Formato de resposta da IA inválido.")
       }
-
     } catch (error) {
-      console.error("Erro final capturado na IA:", error)
+      alert("Erro no reconhecimento: " + error.message)
     } finally {
       setCarregando(false)
       setStatusIA('')
@@ -222,23 +219,20 @@ export default function RegistroIA() {
     setStatusIA('Salvando produto no sistema...')
     
     try {
-      let imageUrlFinal = null
+      // Se veio da internet, usa a URL externa direto. Se não, tem que subir a foto pro Supabase.
+      let imageUrlFinal = dados.fotoUrlExterna || null 
       let fileName = null
 
       if (dados.arquivoFotoOriginal) {
         setStatusIA('Enviando foto para a nuvem...')
         fileName = `ia_${Date.now()}.jpg`
         const { error: uploadError } = await supabase.storage.from('produtos').upload(fileName, dados.arquivoFotoOriginal)
-        if (uploadError) {
-            alert("ERRO SUPABASE (Upload Imagem): " + uploadError.message)
-            throw uploadError
-        }
+        if (uploadError) throw uploadError
         const { data: publicData } = supabase.storage.from('produtos').getPublicUrl(fileName)
         imageUrlFinal = publicData.publicUrl
       }
 
       setStatusIA('Registrando no banco de dados...')
-      
       const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
         nome: dados.nome,
         codigo_barras: dados.codigoBarras || null,
@@ -250,10 +244,7 @@ export default function RegistroIA() {
         tipo: 'solo'
       }]).select().single()
 
-      if (erroProd) {
-        alert("ERRO SUPABASE (Insert Produto): " + erroProd.message)
-        throw erroProd
-      }
+      if (erroProd) throw erroProd
 
       const { error: erroLote } = await supabase.from('estoque_lotes').insert([{
         produto_id: novoProduto.id,
@@ -266,14 +257,12 @@ export default function RegistroIA() {
       if (erroLote) {
         await supabase.from('produtos').delete().match({ id: novoProduto.id });
         if (fileName) await supabase.storage.from('produtos').remove([fileName]);
-        alert("ERRO SUPABASE (Insert Lote/Estoque): " + erroLote.message)
         throw erroLote
       }
 
       setSucesso(true)
     } catch (error) {
-      console.error(error)
-      alert('Resumo do Erro ao cadastrar: ' + error.message)
+      alert('Erro ao cadastrar: ' + error.message)
     } finally {
       setCarregando(false)
       setStatusIA('')
@@ -283,15 +272,10 @@ export default function RegistroIA() {
   const marcasDisponiveis = marcasDoBanco.filter(m => m.setor_id === dados.setorId)
 
   // =========================================================
-  // RENDERIZAÇÃO: MODO LOTE
+  // RENDERIZAÇÕES 
   // =========================================================
-  if (modo === 'lote') {
-    return <RegistroIALote onVoltar={() => setModo(null)} />
-  }
+  if (modo === 'lote') return <RegistroIALote onVoltar={() => setModo(null)} />
 
-  // =========================================================
-  // RENDERIZAÇÃO: MENU HUB (Escolha de Modo)
-  // =========================================================
   if (modo === null) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10 relative">
@@ -300,7 +284,7 @@ export default function RegistroIA() {
             <ArrowLeft size={20} />
           </button>
           <span className="font-bold text-sm tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-600 to-purple-600 flex items-center gap-1.5">
-            <Sparkles size={16} /> Registro I.A.
+            <Sparkles size={16} /> Registro Inteligente
           </span>
           <div className="w-9" />
         </div>
@@ -310,25 +294,17 @@ export default function RegistroIA() {
           <p className="text-[#86868B] text-sm mb-8 px-2">Escolha o formato ideal para a sua necessidade no momento.</p>
 
           <div className="flex flex-col gap-4">
-            {/* Botão Individual */}
-            <button 
-              onClick={() => setModo('individual')}
-              className="group flex items-start gap-4 p-6 bg-white rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-fuchsia-200 transition-all text-left"
-            >
+            <button onClick={() => setModo('individual')} className="group flex items-start gap-4 p-6 bg-white rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-fuchsia-200 transition-all text-left">
               <div className="w-14 h-14 rounded-2xl bg-fuchsia-50 flex items-center justify-center text-fuchsia-600 shrink-0 group-hover:scale-110 transition-transform">
-                <Package size={28} />
+                <Globe size={28} />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-gray-800 mb-1">Produto Único</h3>
-                <p className="text-sm text-gray-500 leading-relaxed">Cadastre um produto detalhadamente, vinculando o código de barras primeiro.</p>
+                <h3 className="text-lg font-bold text-gray-800 mb-1">Produto Único (Auto-Busca)</h3>
+                <p className="text-sm text-gray-500 leading-relaxed">Bipe o código. Buscamos a foto e o nome na internet ou via I.A. automaticamente.</p>
               </div>
             </button>
 
-            {/* Botão Lote */}
-            <button 
-              onClick={() => setModo('lote')}
-              className="group flex items-start gap-4 p-6 bg-white rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-orange-200 transition-all text-left"
-            >
+            <button onClick={() => setModo('lote')} className="group flex items-start gap-4 p-6 bg-white rounded-3xl shadow-sm border border-gray-100 hover:shadow-md hover:border-orange-200 transition-all text-left">
               <div className="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center text-orange-500 shrink-0 group-hover:scale-110 transition-transform">
                 <Boxes size={28} />
               </div>
@@ -343,9 +319,6 @@ export default function RegistroIA() {
     )
   }
 
-  // =========================================================
-  // RENDERIZAÇÃO: MODO INDIVIDUAL (Seu Código Original Estável)
-  // =========================================================
   if (sucesso) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center px-4 py-12">
@@ -361,7 +334,7 @@ export default function RegistroIA() {
             <button onClick={() => navigate('/estoque')} className="w-full py-4 bg-[#1D1D1F] text-white font-bold rounded-2xl shadow-lg hover:bg-black transition-colors">
               Ver no Estoque
             </button>
-            <button onClick={() => { setSucesso(false); setEtapa(1); setDados({codigoBarras:'', nome:'', setorId:'', marcaId:'', precoCusto:'', precoVenda:'', estoque:'', fotoPreview: null, arquivoFotoOriginal: null}) }} className="w-full py-4 bg-gray-100 text-gray-700 font-bold rounded-2xl hover:bg-gray-200 transition-colors">
+            <button onClick={() => { setSucesso(false); setEtapa(1); setDados({codigoBarras:'', nome:'', setorId:'', marcaId:'', precoCusto:'', precoVenda:'', estoque:'', fotoPreview: null, arquivoFotoOriginal: null, fotoUrlExterna: null}) }} className="w-full py-4 bg-gray-100 text-gray-700 font-bold rounded-2xl hover:bg-gray-200 transition-colors">
               Cadastrar Outro
             </button>
           </div>
@@ -386,19 +359,17 @@ export default function RegistroIA() {
   return (
     <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center px-4 py-10 relative">
       <div className="w-full max-w-md mb-8 flex justify-between items-center px-2">
-        {/* Agora o voltar volta pro Hub (setModo(null)) em vez do admin-home */}
         <button onClick={() => setModo(null)} disabled={carregando} className="p-2 bg-white rounded-full shadow-sm text-gray-500 hover:text-gray-800 transition-colors disabled:opacity-50">
           <ArrowLeft size={20} />
         </button>
         <span className="font-bold text-sm tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-600 to-purple-600 flex items-center gap-1.5">
-          <Sparkles size={16} /> Registro I.A. (Único)
+          <Sparkles size={16} /> Registro Inteligente (Único)
         </span>
         <div className="w-9" />
       </div>
 
       <div className="w-full max-w-md">
         <AnimatePresence mode="wait">
-
           {/* ETAPA 1 */}
           {etapa === 1 && (
             <motion.div key="e1" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 text-center">
@@ -425,7 +396,7 @@ export default function RegistroIA() {
                 <Sparkles size={40} />
               </div>
               <h2 className="text-2xl font-bold text-gray-800 mb-2 tracking-tight">Ler Embalagem</h2>
-              <p className="text-gray-500 text-sm mb-8">Tire uma foto nítida da frente do produto. A IA fará o resto.</p>
+              <p className="text-gray-500 text-sm mb-8">Não encontramos este código na base global. Tire uma foto nítida da frente do produto para nossa IA ler.</p>
 
               <input type="file" accept="image/*" capture="environment" ref={cameraFotoRef} onChange={handleCapturarFoto} className="hidden" />
               
@@ -443,13 +414,12 @@ export default function RegistroIA() {
           {etapa === 3 && (
             <motion.div key="e3" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 pb-8">
               <h2 className="text-xl font-bold text-gray-800 mb-5 tracking-tight flex items-center gap-2">
-                <Sparkles size={20} className="text-fuchsia-600" /> Revisão da IA
+                <Sparkles size={20} className="text-fuchsia-600" /> Revisão
               </h2>
 
-              {/* FOTO E NOME */}
               <div className="flex gap-4 mb-6 bg-gray-50 p-3 rounded-2xl border border-gray-100">
                 {dados.fotoPreview ? (
-                  <img src={dados.fotoPreview} alt="Preview" className="w-20 h-20 object-cover rounded-xl shadow-sm" />
+                  <img src={dados.fotoPreview} alt="Preview" className="w-20 h-20 object-cover rounded-xl shadow-sm bg-white" />
                 ) : (
                   <div className="w-20 h-20 bg-gray-200 rounded-xl flex items-center justify-center text-gray-400"><Camera size={24}/></div>
                 )}
@@ -467,8 +437,6 @@ export default function RegistroIA() {
               </div>
 
               <div className="space-y-4 mb-8">
-                
-                {/* SETOR E MARCA */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5 w-full">
                     <label className="text-xs font-bold text-gray-400 uppercase tracking-wide pl-1">Setor</label>
@@ -496,7 +464,6 @@ export default function RegistroIA() {
                   </div>
                 </div>
 
-                {/* VALORES */}
                 <div className="grid grid-cols-3 gap-3">
                   <div className="flex flex-col gap-1.5 w-full">
                     <label className="text-xs font-bold text-gray-400 uppercase tracking-wide pl-1">Qtd</label>
@@ -528,7 +495,6 @@ export default function RegistroIA() {
                     </div>
                   </div>
                 </div>
-
               </div>
 
               <button 
@@ -540,7 +506,6 @@ export default function RegistroIA() {
               </button>
             </motion.div>
           )}
-
         </AnimatePresence>
       </div>
 
