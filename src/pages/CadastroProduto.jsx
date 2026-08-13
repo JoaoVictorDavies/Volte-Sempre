@@ -5,6 +5,28 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, ArrowRight, CheckCircle, Tag, FileText, Barcode, DollarSign, Hash, ChevronRight, PackagePlus, Camera, Check, X } from 'lucide-react'
 import LeitorCamera from '../components/LeitorCamera'
 
+// ==========================================
+// DICIONÁRIO DE PREFIXOS GS1 (CÓDIGO DE BARRAS)
+// ==========================================
+const PREFIXOS_MARCAS = [
+  { prefixo: '7891033', marca: 'O Boticário' },
+  { prefixo: '7891060', marca: 'Natura' },
+  { prefixo: '7891150', marca: 'Natura' },
+  { prefixo: '7891017', marca: 'Avon' },
+  { prefixo: '7891031', marca: 'Avon' },
+  { prefixo: '7898084', marca: 'Eudora' },
+  { prefixo: '7898275', marca: 'Eudora' },
+  { prefixo: '7899035', marca: 'Jequiti' },
+  { prefixo: '7898496', marca: 'Jequiti' },
+  { prefixo: '088', marca: 'Mary Kay' } // Prefixo comum de importação MK
+]
+
+const detectarMarcaPorCodigo = (codigo) => {
+  if (!codigo) return null;
+  const match = PREFIXOS_MARCAS.find(p => codigo.startsWith(p.prefixo));
+  return match ? match.marca : null;
+}
+
 let slideDirection = 1
 
 const stepVariants = {
@@ -152,7 +174,6 @@ export default function CadastroProduto() {
   })
 
   // === VALIDAÇÃO DE CAMPOS VAZIOS ===
-  // Se for Lote: precisa só das métricas do lote. Se for Novo: precisa de Nome também.
   const formValido = isLoteMode 
     ? (dados.estoque !== '' && dados.precoCusto !== '' && dados.precoVenda !== '')
     : (dados.nome.trim() !== '' && dados.estoque !== '' && dados.precoCusto !== '' && dados.precoVenda !== '');
@@ -178,7 +199,7 @@ export default function CadastroProduto() {
   const avancar = () => { slideDirection = 1; setEtapa(e => e + 1) }
   const voltar = () => { slideDirection = -1; setEtapa(e => e - 1) }
 
-  // Buscando o produto via input com INNER JOIN para pegar Marca, Setor e Estoque
+  // Buscando o produto via input
   const handleBarcodeChange = (e) => {
     const codigo = e.target.value
     setDados(prev => ({ ...prev, codigoBarras: codigo }))
@@ -227,7 +248,7 @@ export default function CadastroProduto() {
     setCodigoLidoCamera(codigo);
   }
 
-  // Buscando o produto via Câmera com INNER JOIN para pegar Marca, Setor e Estoque
+  // Buscando o produto via Câmera
   const confirmarCodigoLido = async () => {
     setCameraAtiva(false)
     setDados(prev => ({ ...prev, codigoBarras: codigoLidoCamera }))
@@ -264,10 +285,43 @@ export default function CadastroProduto() {
     avancar()
   }
 
-  const iniciarModoManual = () => {
+  // ==========================================
+  // INTELIGÊNCIA DE AUTO-SELEÇÃO DE MARCA
+  // ==========================================
+  const iniciarModoManual = async () => {
     setIsLoteMode(false)
-    setTotalEtapas(5) 
-    avancar()
+    setTotalEtapas(5)
+    
+    // Liga o loader para o usuário ver que o sistema está pensando
+    setBuscando(true)
+    let stepDestino = 2 // Padrão: ir para a seleção de Setor
+
+    const marcaDetectada = detectarMarcaPorCodigo(dados.codigoBarras)
+    
+    if (marcaDetectada) {
+      // Procura a marca no banco de dados
+      const { data: marcaDb } = await supabase
+        .from('marcas')
+        .select('id, nome, setor_id, setores(nome)')
+        .ilike('nome', `%${marcaDetectada}%`)
+        .single()
+
+      // Se achou a marca e ela está vinculada a um setor, preenche automático e pula as etapas
+      if (marcaDb && marcaDb.setor_id) {
+        setDados(prev => ({
+          ...prev,
+          marcaId: marcaDb.id,
+          marcaNome: marcaDb.nome,
+          setorId: marcaDb.setor_id,
+          setorNome: marcaDb.setores?.nome
+        }))
+        stepDestino = 4 // Pula direto para a seleção de "Produto Solo vs Kit"
+      }
+    }
+
+    setBuscando(false)
+    slideDirection = 1
+    setEtapa(stepDestino)
   }
 
   async function finalizarCadastro() {
@@ -482,7 +536,7 @@ export default function CadastroProduto() {
                   <BackButton 
                     onClick={() => { 
                       setProdutoExistente(null); 
-                      setDados(prev => ({ ...prev, codigoBarras: '' })); // BUG CORRIGIDO AQUI: Limpa o input!
+                      setDados(prev => ({ ...prev, codigoBarras: '' })); 
                       voltar(); 
                     }} 
                     label="Voltar ao Leitor" 
@@ -516,13 +570,21 @@ export default function CadastroProduto() {
                   ))}
                   {marcasDoBanco.length === 0 && <p className="text-[#86868B] text-sm text-center py-4">Nenhuma marca cadastrada.</p>}
                 </div>
-                <div className="mt-6"><BackButton onClick={voltar} label="Voltar para Setores" /></div>
+                <div className="mt-6"><BackButton onClick={() => { slideDirection = -1; setEtapa(2) }} label="Voltar para Setores" /></div>
               </motion.div>
             )}
 
             {etapa === 4 && !isLoteMode && (
               <motion.div key="etapa4" custom={slideDirection} variants={stepVariants} initial="initial" animate="animate" exit="exit">
                 <StepLabel>Como esse item é vendido?</StepLabel>
+                
+                {dados.marcaNome && (
+                  <div className="bg-blue-50 text-blue-700 px-4 py-3 rounded-xl text-sm font-semibold mb-4 border border-blue-100 flex justify-between items-center">
+                    <span>Marca detectada: {dados.marcaNome}</span>
+                    <CheckCircle size={16} />
+                  </div>
+                )}
+
                 <div className="flex flex-col gap-3">
                   <SelectButton onClick={() => { setDados({ ...dados, tipo: 'solo' }); avancar() }} subtitle="Item individual na prateleira.">
                     Produto Solo
@@ -531,7 +593,9 @@ export default function CadastroProduto() {
                     Kit Fixo
                   </SelectButton>
                 </div>
-                <div className="mt-6"><BackButton onClick={voltar} label="Voltar para Marcas" /></div>
+                <div className="mt-6">
+                  <BackButton onClick={() => { slideDirection = -1; setEtapa(dados.marcaNome ? 1 : 3) }} label="Voltar" />
+                </div>
               </motion.div>
             )}
 
