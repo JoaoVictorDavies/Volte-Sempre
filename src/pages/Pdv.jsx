@@ -28,7 +28,7 @@ export default function Pdv() {
 
   // Estados do Pagamento Múltiplo (Modal)
   const [modalAberto, setModalAberto] = useState(false)
-  const [pagamentos, setPagamentos] = useState([]) // Array para armazenar os múltiplos pagamentos
+  const [pagamentos, setPagamentos] = useState([]) 
   const [processandoVenda, setProcessandoVenda] = useState(false)
 
   // Estado da Sessão Logada
@@ -49,16 +49,43 @@ export default function Pdv() {
   const faltaPagar = Math.max(0, total - totalRecebido)
   const troco = Math.max(0, totalRecebido - total)
 
+  // ==========================================
+  // BLINDAGEM CONTRA QUEDAS (RECUPERAÇÃO DE CAIXA)
+  // ==========================================
   useEffect(() => {
+    const carrinhoSalvo = localStorage.getItem('volte_pdv_carrinho')
+    if (carrinhoSalvo) {
+      try { setCarrinho(JSON.parse(carrinhoSalvo)) } catch (e) { console.error("Erro ao ler carrinho salvo.") }
+    }
+
+    const ultimoProdutoSalvo = localStorage.getItem('volte_pdv_ultimo')
+    if (ultimoProdutoSalvo) {
+      try { setUltimoProduto(JSON.parse(ultimoProdutoSalvo)) } catch (e) { console.error("Erro ao ler último produto.") }
+    }
+
     const handleResize = () => setIsMobile(window.innerWidth < 768)
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   // ==========================================
+  // SALVAMENTO AUTOMÁTICO DO CARRINHO EM TEMPO REAL
+  // ==========================================
+  useEffect(() => {
+    localStorage.setItem('volte_pdv_carrinho', JSON.stringify(carrinho))
+  }, [carrinho])
+
+  useEffect(() => {
+    if (ultimoProduto) {
+      localStorage.setItem('volte_pdv_ultimo', JSON.stringify(ultimoProduto))
+    } else {
+      localStorage.removeItem('volte_pdv_ultimo')
+    }
+  }, [ultimoProduto])
+
+  // ==========================================
   // REGRA: AUTO-REMOVER ÚLTIMO PRODUTO BIPADO
   // ==========================================
-  // Se o último produto exibido no painel direito não existir mais no carrinho, a foto some.
   useEffect(() => {
     if (ultimoProduto && !carrinho.find(item => item.id === ultimoProduto.id)) {
       setUltimoProduto(null)
@@ -232,7 +259,7 @@ export default function Pdv() {
   // 7. LÓGICA DE PAGAMENTOS MÚLTIPLOS (DIVIDIR CONTA)
   // ==========================================
   const adicionarPagamento = (tipo) => {
-    if (faltaPagar <= 0) return // Não adiciona se já pagou tudo
+    if (faltaPagar <= 0) return 
     setPagamentos([...pagamentos, { id: Date.now(), metodo: tipo, valor: faltaPagar.toFixed(2) }])
   }
 
@@ -245,7 +272,7 @@ export default function Pdv() {
   }
 
   const abrirModalPagamento = () => {
-    setPagamentos([]) // Limpa os pagamentos ao abrir a tela
+    setPagamentos([]) 
     setModalAberto(true)
   }
 
@@ -261,14 +288,13 @@ export default function Pdv() {
     setProcessandoVenda(true)
 
     try {
-      // Concatena os métodos de pagamento (ex: 'pix, dinheiro')
       const nomesMetodos = pagamentos.map(p => p.metodo).join(', ')
 
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
         .insert([{ 
           total: total, 
-          metodo_pagamento: nomesMetodos, // Pode exigir que a coluna na sua DB seja do tipo Text/Varchar
+          metodo_pagamento: nomesMetodos, 
           valor_recebido: totalRecebido,
           troco: troco > 0 ? troco : 0,
           sessao_id: sessaoAtiva ? sessaoAtiva.id : null,
@@ -320,8 +346,13 @@ export default function Pdv() {
       }
 
       alert("✅ Venda finalizada com sucesso!")
+      
+      // Limpa os estados e apaga o carrinho salvo no cache (já que a venda foi fechada)
       setCarrinho([])
       setUltimoProduto(null)
+      localStorage.removeItem('volte_pdv_carrinho')
+      localStorage.removeItem('volte_pdv_ultimo')
+      
       setModalAberto(false)
       carregarEstoque()
 
@@ -355,12 +386,24 @@ export default function Pdv() {
             <h1 className="text-xl font-bold text-blue-700">Caixa: {sessaoAtiva?.operador || 'Carregando...'}</h1>
           </div>
           
-          <button 
-            onClick={() => setCalcAberto(true)} 
-            className="text-white font-bold px-5 py-2 bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 transition-colors"
-          >
-            🧮 Calculadora
-          </button>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => {
+                if(window.confirm("Deseja realmente cancelar toda a venda atual?")) {
+                  setCarrinho([]); setUltimoProduto(null);
+                }
+              }} 
+              className="text-red-500 hover:text-red-700 font-bold px-4 py-2 hover:bg-red-50 rounded-lg transition-colors border border-red-200"
+            >
+              Limpar Caixa
+            </button>
+            <button 
+              onClick={() => setCalcAberto(true)} 
+              className="text-white font-bold px-5 py-2 bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 transition-colors"
+            >
+              🧮 Calculadora
+            </button>
+          </div>
         </header>
 
         {/* BARRA DE BUSCA E CÂMERA */}
@@ -566,7 +609,7 @@ export default function Pdv() {
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">R$</span>
                           <input 
                             type="number"
-                            autoFocus={index === pagamentos.length - 1} // Foca automaticamente no último adicionado
+                            autoFocus={index === pagamentos.length - 1} 
                             value={pag.valor} 
                             onChange={(e) => atualizarValorPagamento(pag.id, e.target.value)}
                             className="w-full bg-gray-50 border border-gray-200 p-3 pl-10 rounded-xl font-bold text-lg text-gray-800 outline-none focus:bg-white focus:border-blue-400 transition-colors"
