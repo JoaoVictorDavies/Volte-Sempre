@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Camera, MinusCircle, AlertCircle, ShoppingBag } from 'lucide-react'
+import { Camera, MinusCircle, ShoppingBag, X } from 'lucide-react'
 import LeitorInterativo from '../components/LeitorInterativo'
 
 export default function Pdv() {
@@ -13,23 +13,22 @@ export default function Pdv() {
   const [estoqueCompleto, setEstoqueCompleto] = useState([])
   const [resultadosBusca, setResultadosBusca] = useState([])
   
-  // Novo Estado: Último Produto Bipado (Para exibição no painel direito)
+  // Novo Estado: Último Produto Bipado
   const [ultimoProduto, setUltimoProduto] = useState(null)
 
   // Novo Estado: Modo Remoção (Acionado pela barra de Espaço)
   const [modoRemocao, setModoRemocao] = useState(false)
 
-  // Novo Estado: Detecção se é Mobile/Tablet (para exibir botão da câmera)
+  // Detecção de Mobile
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
 
   // Estados da Calculadora
   const [calcAberto, setCalcAberto] = useState(false)
   const [calcDisplay, setCalcDisplay] = useState('')
 
-  // Estados do Pagamento (Modal)
+  // Estados do Pagamento Múltiplo (Modal)
   const [modalAberto, setModalAberto] = useState(false)
-  const [metodo, setMetodo] = useState('pix') 
-  const [valorRecebido, setValorRecebido] = useState('')
+  const [pagamentos, setPagamentos] = useState([]) // Array para armazenar os múltiplos pagamentos
   const [processandoVenda, setProcessandoVenda] = useState(false)
 
   // Estado da Sessão Logada
@@ -42,15 +41,29 @@ export default function Pdv() {
   const bufferLeitor = useRef('')
   const ultimoTempoDigitação = useRef(Date.now())
 
+  // Cálculos Financeiros Base
   const total = carrinho.reduce((acc, item) => acc + (item.qtd * item.preco_venda), 0)
-  const troco = metodo === 'dinheiro' && valorRecebido ? parseFloat(valorRecebido) - total : 0
+  
+  // Cálculos de Pagamentos Múltiplos
+  const totalRecebido = pagamentos.reduce((acc, p) => acc + (parseFloat(p.valor) || 0), 0)
+  const faltaPagar = Math.max(0, total - totalRecebido)
+  const troco = Math.max(0, totalRecebido - total)
 
-  // Detecta se a tela é mobile/notebook em tempo real
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768)
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
+
+  // ==========================================
+  // REGRA: AUTO-REMOVER ÚLTIMO PRODUTO BIPADO
+  // ==========================================
+  // Se o último produto exibido no painel direito não existir mais no carrinho, a foto some.
+  useEffect(() => {
+    if (ultimoProduto && !carrinho.find(item => item.id === ultimoProduto.id)) {
+      setUltimoProduto(null)
+    }
+  }, [carrinho, ultimoProduto])
 
   // ==========================================
   // 1. VERIFICAÇÃO DE SEGURANÇA DA SESSÃO
@@ -107,16 +120,14 @@ export default function Pdv() {
   // 4. LÓGICA DE ADICIONAR E REMOVER PRODUTO
   // ==========================================
   const processarBipProduto = (produto, forcarRemocao = false) => {
-    // Atualiza o card visual do "Último Produto Bipado"
     setUltimoProduto(produto)
 
     const estaEmModoRemocao = forcarRemocao || modoRemocao
 
     if (estaEmModoRemocao) {
-      // MODO REMOÇÃO: Subtrai 1 unidade ou remove se chegar a zero
       setCarrinho(prev => {
         const itemExistente = prev.find(item => item.id === produto.id)
-        if (!itemExistente) return prev // Se não está no carrinho, não faz nada
+        if (!itemExistente) return prev 
         
         if (itemExistente.qtd > 1) {
           return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd - 1 } : item)
@@ -124,10 +135,8 @@ export default function Pdv() {
           return prev.filter(item => item.id !== produto.id)
         }
       })
-      // Desativa o modo remoção após estornar o item
       setModoRemocao(false)
     } else {
-      // MODO ADIÇÃO: Soma 1 unidade
       setCarrinho(prev => {
         const itemExistente = prev.find(item => item.id === produto.id)
         if (itemExistente) {
@@ -170,20 +179,17 @@ export default function Pdv() {
   // ==========================================
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Não interfere se o operador estiver digitando nos inputs dos Modals
       if (modalAberto || calcAberto) return
 
-      // TECLA ESPAÇO: Alterna para o MODO REMOÇÃO
       if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
         e.preventDefault()
         setModoRemocao(prev => !prev)
         return
       }
 
-      // LEITOR DE CÓDIGO USB/BLUETOOTH (Captura em Milissegundos)
       const agora = Date.now()
       if (agora - ultimoTempoDigitação.current > 100) {
-        bufferLeitor.current = '' // Limpa o buffer se a digitação for lenta (humana)
+        bufferLeitor.current = '' 
       }
       ultimoTempoDigitação.current = agora
 
@@ -223,23 +229,47 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // 7. FINALIZAR A VENDA (MOTOR DE DEDUÇÃO PEPS)
+  // 7. LÓGICA DE PAGAMENTOS MÚLTIPLOS (DIVIDIR CONTA)
+  // ==========================================
+  const adicionarPagamento = (tipo) => {
+    if (faltaPagar <= 0) return // Não adiciona se já pagou tudo
+    setPagamentos([...pagamentos, { id: Date.now(), metodo: tipo, valor: faltaPagar.toFixed(2) }])
+  }
+
+  const atualizarValorPagamento = (id, novoValor) => {
+    setPagamentos(pagamentos.map(p => p.id === id ? { ...p, valor: novoValor } : p))
+  }
+
+  const removerPagamento = (id) => {
+    setPagamentos(pagamentos.filter(p => p.id !== id))
+  }
+
+  const abrirModalPagamento = () => {
+    setPagamentos([]) // Limpa os pagamentos ao abrir a tela
+    setModalAberto(true)
+  }
+
+  // ==========================================
+  // 8. FINALIZAR A VENDA (MOTOR DE DEDUÇÃO PEPS)
   // ==========================================
   const finalizarCompra = async () => {
-    if (metodo === 'dinheiro' && (valorRecebido === '' || parseFloat(valorRecebido) < total)) {
-      alert("O valor recebido é menor que o total da compra!")
+    if (totalRecebido < total) {
+      alert("O valor recebido ainda não cobre o total da compra!")
       return
     }
 
     setProcessandoVenda(true)
 
     try {
+      // Concatena os métodos de pagamento (ex: 'pix, dinheiro')
+      const nomesMetodos = pagamentos.map(p => p.metodo).join(', ')
+
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
         .insert([{ 
           total: total, 
-          metodo_pagamento: metodo, 
-          valor_recebido: metodo === 'dinheiro' ? parseFloat(valorRecebido) : total,
+          metodo_pagamento: nomesMetodos, // Pode exigir que a coluna na sua DB seja do tipo Text/Varchar
+          valor_recebido: totalRecebido,
           troco: troco > 0 ? troco : 0,
           sessao_id: sessaoAtiva ? sessaoAtiva.id : null,
           loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
@@ -293,8 +323,6 @@ export default function Pdv() {
       setCarrinho([])
       setUltimoProduto(null)
       setModalAberto(false)
-      setValorRecebido('')
-      setMetodo('pix')
       carregarEstoque()
 
     } catch (error) {
@@ -335,7 +363,7 @@ export default function Pdv() {
           </button>
         </header>
 
-        {/* BARRA DE BUSCA E CÂMERA (Câmera visível apenas em Mobile) */}
+        {/* BARRA DE BUSCA E CÂMERA */}
         <div className="p-4 bg-gray-50 border-b border-gray-200 z-20 relative">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -408,39 +436,42 @@ export default function Pdv() {
       {/* =========================================
           LADO DIREITO: ÚLTIMO PRODUTO + TOTAL + COBRAR
           ========================================= */}
-      <div className="w-full md:w-96 bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-auto md:h-full z-20">
+      <div className="w-full md:w-[450px] bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-auto md:h-full z-20">
         
-        {/* CARD DO ÚLTIMO PRODUTO BIPADO */}
-        <div className="p-4 bg-gray-50 border-b border-gray-200">
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Último Item Bipado</p>
+        {/* CARD DO ÚLTIMO PRODUTO BIPADO (AMPLIADO) */}
+        <div className="p-6 bg-gray-50 border-b border-gray-200">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Último Item Bipado</p>
           {ultimoProduto ? (
-            <div className="flex items-center gap-4 bg-white p-3 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in">
-              <div className="w-20 h-20 bg-gray-100 rounded-xl overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center">
+            <div className="flex flex-col md:flex-row items-center md:items-start gap-6 bg-white p-6 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in">
+              <div className="w-32 h-32 md:w-36 md:h-36 bg-gray-50 rounded-2xl overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center shadow-inner">
                 {ultimoProduto.imagem_url ? (
                   <img src={ultimoProduto.imagem_url} alt={ultimoProduto.nome} className="w-full h-full object-cover" />
                 ) : (
-                  <ShoppingBag size={32} className="text-gray-300" />
+                  <ShoppingBag size={48} className="text-gray-300" />
                 )}
               </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="font-bold text-gray-800 text-sm truncate">{ultimoProduto.nome}</h4>
-                <p className="text-xs text-gray-400 mt-0.5">Cód: {ultimoProduto.codigo_barras || 'N/A'}</p>
-                <p className="text-green-600 font-bold text-lg mt-1">R$ {Number(ultimoProduto.preco_venda).toFixed(2)}</p>
+              <div className="flex-1 min-w-0 text-center md:text-left flex flex-col justify-center h-full">
+                <h4 className="font-extrabold text-gray-800 text-lg md:text-xl leading-tight mb-2">{ultimoProduto.nome}</h4>
+                <p className="text-sm text-gray-400 mb-2 font-mono bg-gray-100 self-center md:self-start px-2 py-1 rounded">
+                  {ultimoProduto.codigo_barras || 'SEM CÓDIGO'}
+                </p>
+                <p className="text-green-600 font-black text-3xl mt-auto">R$ {Number(ultimoProduto.preco_venda).toFixed(2)}</p>
               </div>
             </div>
           ) : (
-            <div className="h-24 bg-white rounded-2xl border border-dashed border-gray-200 flex items-center justify-center text-gray-400 text-xs font-medium">
-              Aguardando bipagem...
+            <div className="h-40 bg-white rounded-3xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-gray-400 text-sm font-medium gap-3">
+              <ShoppingBag size={32} className="opacity-50" />
+              <span>Aguardando produto na esteira...</span>
             </div>
           )}
         </div>
 
         {/* VALORES DO SUBTOTAL E TOTAL */}
-        <div className="p-6 flex-1 flex flex-col justify-center">
-          <div className="flex justify-between text-gray-500 mb-2"><span>Subtotal</span><span>R$ {total.toFixed(2)}</span></div>
+        <div className="p-6 flex-1 flex flex-col justify-end">
+          <div className="flex justify-between text-gray-500 mb-2 text-lg"><span>Subtotal</span><span>R$ {total.toFixed(2)}</span></div>
           <div className="flex justify-between items-end border-t border-dashed border-gray-300 pt-4 mt-2">
-            <span className="text-xl font-bold text-gray-700">Total</span>
-            <span className="text-4xl font-bold text-green-600">R$ {total.toFixed(2)}</span>
+            <span className="text-2xl font-bold text-gray-700">Total</span>
+            <span className="text-5xl font-black text-green-600">R$ {total.toFixed(2)}</span>
           </div>
         </div>
 
@@ -448,7 +479,7 @@ export default function Pdv() {
         <div className="p-6 bg-gray-50 border-t border-gray-100">
           <button 
             disabled={carrinho.length === 0}
-            onClick={() => setModalAberto(true)}
+            onClick={abrirModalPagamento}
             className={`w-full text-white text-2xl font-bold py-6 rounded-2xl shadow-lg transition-transform ${carrinho.length === 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 transform hover:scale-105'}`}
           >
             Cobrar
@@ -468,68 +499,117 @@ export default function Pdv() {
       )}
 
       {/* =========================================
-          MODALS DE COBRANÇA E CALCULADORA
+          MODAL DE PAGAMENTO MÚLTIPLO (CONTA DIVIDIDA)
           ========================================= */}
       {modalAberto && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 z-[100] flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-            <header className="bg-blue-600 p-4 text-white flex justify-between items-center">
-              <h2 className="text-xl font-bold">Finalizar Venda</h2>
-              <button onClick={() => setModalAberto(false)} className="text-blue-200 hover:text-white text-2xl font-bold">&times;</button>
+        <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <header className="bg-blue-600 p-5 text-white flex justify-between items-center shadow-md z-10">
+              <h2 className="text-xl font-bold flex items-center gap-2">🛒 Finalizar Venda</h2>
+              <button onClick={() => setModalAberto(false)} className="text-blue-200 hover:text-white transition-colors">
+                <X size={28} />
+              </button>
             </header>
+            
             <div className="p-6 flex-1 overflow-y-auto">
-              <div className="text-center mb-6">
-                <p className="text-gray-500 font-medium">Total a Pagar</p>
-                <p className="text-5xl font-bold text-green-600">R$ {total.toFixed(2)}</p>
+              
+              {/* Resumo dos Valores */}
+              <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 mb-6 flex flex-col gap-2">
+                <div className="flex justify-between items-center text-gray-600">
+                  <span className="font-medium">Total da Compra</span>
+                  <span className="font-bold text-lg">R$ {total.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center text-blue-600">
+                  <span className="font-medium">Total Recebido</span>
+                  <span className="font-bold text-lg">R$ {totalRecebido.toFixed(2)}</span>
+                </div>
+                <div className="h-px bg-gray-200 my-1"></div>
+                <div className="flex justify-between items-center">
+                  <span className={`font-bold ${faltaPagar > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                    {faltaPagar > 0 ? 'Falta Pagar' : 'Troco a Devolver'}
+                  </span>
+                  <span className={`text-3xl font-black ${faltaPagar > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    R$ {faltaPagar > 0 ? faltaPagar.toFixed(2) : troco.toFixed(2)}
+                  </span>
+                </div>
               </div>
-              <h3 className="font-bold text-gray-700 mb-3 border-b pb-2">Forma de Pagamento</h3>
-              <div className="grid grid-cols-2 gap-3 mb-6">
-                {['pix', 'credito', 'debito', 'dinheiro'].map(tipo => (
-                  <button 
-                    key={tipo} onClick={() => { setMetodo(tipo); setValorRecebido(''); }}
-                    className={`p-4 rounded-xl font-bold border-2 capitalize transition-all ${metodo === tipo ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    {tipo === 'pix' ? '💠 Pix' : tipo === 'credito' ? '💳 Crédito' : tipo === 'debito' ? '💳 Débito' : '💵 Dinheiro'}
-                  </button>
-                ))}
-              </div>
-              {metodo === 'dinheiro' && (
-                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 animate-in slide-in-from-bottom-2">
-                  <label className="block text-sm font-bold text-gray-700 mb-2">Valor Recebido (R$)</label>
-                  <input 
-                    type="number" autoFocus value={valorRecebido} onChange={(e) => setValorRecebido(e.target.value)}
-                    placeholder="Ex: 50.00"
-                    className="w-full border border-gray-300 p-4 rounded-lg focus:ring-2 focus:ring-blue-500 text-xl text-center outline-none"
-                  />
-                  {valorRecebido && parseFloat(valorRecebido) >= total && (
-                    <div className="mt-4 flex justify-between items-center bg-green-100 p-4 rounded-lg border border-green-200">
-                      <span className="font-bold text-green-800">Troco a devolver:</span>
-                      <span className="text-2xl font-bold text-green-700">R$ {troco.toFixed(2)}</span>
-                    </div>
-                  )}
+
+              {/* Botões para Adicionar Método de Pagamento */}
+              {faltaPagar > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Selecione o(s) Pagamento(s)</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {['pix', 'credito', 'debito', 'dinheiro'].map(tipo => (
+                      <button 
+                        key={tipo} 
+                        onClick={() => adicionarPagamento(tipo)}
+                        className="p-4 rounded-xl font-bold border-2 border-gray-200 text-gray-700 bg-white hover:bg-gray-50 hover:border-blue-300 transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95"
+                      >
+                        {tipo === 'pix' ? '💠 Pix' : tipo === 'credito' ? '💳 Crédito' : tipo === 'debito' ? '💳 Débito' : '💵 Dinheiro'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Lista Dinâmica de Pagamentos Inseridos */}
+              {pagamentos.length > 0 && (
+                <div className="animate-in slide-in-from-bottom-4">
+                  <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Valores Inseridos</h3>
+                  <div className="space-y-3">
+                    {pagamentos.map((pag, index) => (
+                      <div key={pag.id} className="flex items-center gap-3 bg-white p-3 rounded-2xl border-2 border-blue-100 shadow-sm">
+                        <div className="bg-blue-50 text-blue-700 font-bold px-3 py-2 rounded-lg text-sm w-24 text-center capitalize">
+                          {pag.metodo}
+                        </div>
+                        <div className="flex-1 relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">R$</span>
+                          <input 
+                            type="number"
+                            autoFocus={index === pagamentos.length - 1} // Foca automaticamente no último adicionado
+                            value={pag.valor} 
+                            onChange={(e) => atualizarValorPagamento(pag.id, e.target.value)}
+                            className="w-full bg-gray-50 border border-gray-200 p-3 pl-10 rounded-xl font-bold text-lg text-gray-800 outline-none focus:bg-white focus:border-blue-400 transition-colors"
+                          />
+                        </div>
+                        <button 
+                          onClick={() => removerPagamento(pag.id)} 
+                          className="w-12 h-12 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                        >
+                          <X size={24} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
-            <div className="p-4 bg-gray-100 border-t flex gap-3">
-              <button onClick={() => setModalAberto(false)} className="flex-1 py-4 font-bold text-gray-600 bg-white border border-gray-300 rounded-xl hover:bg-gray-50">Cancelar</button>
+
+            <div className="p-5 bg-gray-50 border-t border-gray-200 flex gap-3 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)]">
+              <button onClick={() => setModalAberto(false)} className="px-6 py-4 font-bold text-gray-600 bg-white border border-gray-300 rounded-2xl hover:bg-gray-100 active:scale-95 transition-transform">
+                Voltar
+              </button>
               <button 
                 onClick={finalizarCompra}
-                disabled={processandoVenda || (metodo === 'dinheiro' && (!valorRecebido || parseFloat(valorRecebido) < total))}
-                className={`flex-1 py-4 font-bold text-white rounded-xl shadow-lg transition-all ${processandoVenda || (metodo === 'dinheiro' && (!valorRecebido || parseFloat(valorRecebido) < total)) ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+                disabled={processandoVenda || faltaPagar > 0}
+                className={`flex-1 py-4 font-bold text-white rounded-2xl shadow-xl transition-all ${processandoVenda || faltaPagar > 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 active:scale-95'}`}
               >
-                {processandoVenda ? 'Registrando...' : 'Confirmar Venda'}
+                {processandoVenda ? 'Registrando...' : 'Confirmar Pagamento'}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* =========================================
+          CALCULADORA MODAL
+          ========================================= */}
       {calcAberto && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
             <header className="bg-gray-800 p-4 text-white flex justify-between items-center">
               <h2 className="text-xl font-bold">🧮 Calculadora</h2>
-              <button onClick={() => setCalcAberto(false)} className="text-gray-400 hover:text-white text-3xl font-bold">&times;</button>
+              <button onClick={() => setCalcAberto(false)} className="text-gray-400 hover:text-white transition-colors"><X size={28} /></button>
             </header>
 
             <div className="p-6">
