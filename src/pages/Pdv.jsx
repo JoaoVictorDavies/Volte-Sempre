@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Camera } from 'lucide-react'
-import LeitorInterativo from '../components/LeitorInterativo' // ← Importamos o nosso leitor interativo modular
+import { Camera, MinusCircle, AlertCircle, ShoppingBag } from 'lucide-react'
+import LeitorInterativo from '../components/LeitorInterativo'
 
 export default function Pdv() {
   const navigate = useNavigate()
@@ -13,6 +13,15 @@ export default function Pdv() {
   const [estoqueCompleto, setEstoqueCompleto] = useState([])
   const [resultadosBusca, setResultadosBusca] = useState([])
   
+  // Novo Estado: Último Produto Bipado (Para exibição no painel direito)
+  const [ultimoProduto, setUltimoProduto] = useState(null)
+
+  // Novo Estado: Modo Remoção (Acionado pela barra de Espaço)
+  const [modoRemocao, setModoRemocao] = useState(false)
+
+  // Novo Estado: Detecção se é Mobile/Tablet (para exibir botão da câmera)
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+
   // Estados da Calculadora
   const [calcAberto, setCalcAberto] = useState(false)
   const [calcDisplay, setCalcDisplay] = useState('')
@@ -26,11 +35,22 @@ export default function Pdv() {
   // Estado da Sessão Logada
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
 
-  // Estado do Acionador do Modo Câmera Turbo
+  // Estado do Acionador do Modo Câmera
   const [cameraAtiva, setCameraAtiva] = useState(false)
+
+  // Referência para Leitor Global USB
+  const bufferLeitor = useRef('')
+  const ultimoTempoDigitação = useRef(Date.now())
 
   const total = carrinho.reduce((acc, item) => acc + (item.qtd * item.preco_venda), 0)
   const troco = metodo === 'dinheiro' && valorRecebido ? parseFloat(valorRecebido) - total : 0
+
+  // Detecta se a tela é mobile/notebook em tempo real
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
 
   // ==========================================
   // 1. VERIFICAÇÃO DE SEGURANÇA DA SESSÃO
@@ -56,12 +76,11 @@ export default function Pdv() {
       const { data, error } = await supabase.from('produtos').select('*, estoque_lotes(*)')
       if (error) throw error
 
-      // Calcula o estoque real mapeando apenas os lotes ativos com saldo
       const estoqueProcessado = (data || []).map(p => {
         const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
         const estoqueTotal = lotesValidos.reduce((acc, l) => acc + l.quantidade_atual, 0)
         return { ...p, estoqueTotal }
-      }).filter(p => p.estoqueTotal > 0) // Remove o que sumiu do acervo
+      }).filter(p => p.estoqueTotal > 0)
 
       setEstoqueCompleto(estoqueProcessado)
     } catch (error) {
@@ -70,7 +89,7 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // 3. BUSCA EM TEMPO REAL (INPUT TRADICIONAL)
+  // 3. BUSCA EM TEMPO REAL (INPUT MANUAL)
   // ==========================================
   useEffect(() => {
     if (busca.trim() === '') {
@@ -85,24 +104,53 @@ export default function Pdv() {
   }, [busca, estoqueCompleto])
 
   // ==========================================
-  // 4. CONTROLE DO CARRINHO (AÇÕES GERAIS)
+  // 4. LÓGICA DE ADICIONAR E REMOVER PRODUTO
   // ==========================================
-  const adicionarAoCarrinho = (produto) => {
-    const itemExistente = carrinho.find(item => item.id === produto.id)
-    if (itemExistente) {
-      if (itemExistente.qtd < produto.estoqueTotal) {
-        setCarrinho(carrinho.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item))
-      } else {
-        alert('Quantidade máxima em estoque atingida para este lote!')
-      }
+  const processarBipProduto = (produto, forcarRemocao = false) => {
+    // Atualiza o card visual do "Último Produto Bipado"
+    setUltimoProduto(produto)
+
+    const estaEmModoRemocao = forcarRemocao || modoRemocao
+
+    if (estaEmModoRemocao) {
+      // MODO REMOÇÃO: Subtrai 1 unidade ou remove se chegar a zero
+      setCarrinho(prev => {
+        const itemExistente = prev.find(item => item.id === produto.id)
+        if (!itemExistente) return prev // Se não está no carrinho, não faz nada
+        
+        if (itemExistente.qtd > 1) {
+          return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd - 1 } : item)
+        } else {
+          return prev.filter(item => item.id !== produto.id)
+        }
+      })
+      // Desativa o modo remoção após estornar o item
+      setModoRemocao(false)
     } else {
-      setCarrinho([...carrinho, { ...produto, qtd: 1 }])
+      // MODO ADIÇÃO: Soma 1 unidade
+      setCarrinho(prev => {
+        const itemExistente = prev.find(item => item.id === produto.id)
+        if (itemExistente) {
+          if (itemExistente.qtd < produto.estoqueTotal) {
+            return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item)
+          } else {
+            alert(`Atenção: Limite máximo em estoque (${produto.estoqueTotal} un) atingido!`)
+            return prev
+          }
+        } else {
+          return [...prev, { ...produto, qtd: 1 }]
+        }
+      })
     }
     setBusca('')
   }
 
+  const adicionarAoCarrinho = (produto) => {
+    processarBipProduto(produto, false)
+  }
+
   const alterarQuantidade = (id, delta) => {
-    setCarrinho(carrinho.map(item => {
+    setCarrinho(prev => prev.map(item => {
       if (item.id === id) {
         const novaQtd = item.qtd + delta
         if (novaQtd > 0 && novaQtd <= item.estoqueTotal) {
@@ -114,11 +162,54 @@ export default function Pdv() {
   }
 
   const removerDoCarrinho = (id) => {
-    setCarrinho(carrinho.filter(item => item.id !== id))
+    setCarrinho(prev => prev.filter(item => item.id !== id))
   }
 
   // ==========================================
-  // 5. LÓGICA DA CALCULADORA
+  // 5. OUVINTE GLOBAL DO LEITOR DE CÓDIGO & TECLA ESPAÇO
+  // ==========================================
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Não interfere se o operador estiver digitando nos inputs dos Modals
+      if (modalAberto || calcAberto) return
+
+      // TECLA ESPAÇO: Alterna para o MODO REMOÇÃO
+      if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
+        e.preventDefault()
+        setModoRemocao(prev => !prev)
+        return
+      }
+
+      // LEITOR DE CÓDIGO USB/BLUETOOTH (Captura em Milissegundos)
+      const agora = Date.now()
+      if (agora - ultimoTempoDigitação.current > 100) {
+        bufferLeitor.current = '' // Limpa o buffer se a digitação for lenta (humana)
+      }
+      ultimoTempoDigitação.current = agora
+
+      if (e.key === 'Enter') {
+        const codigoFormatado = bufferLeitor.current.trim()
+        if (codigoFormatado.length > 2) {
+          e.preventDefault()
+          const produtoEncontrado = estoqueCompleto.find(p => p.codigo_barras === codigoFormatado)
+          if (produtoEncontrado) {
+            processarBipProduto(produtoEncontrado)
+          } else {
+            alert(`Produto com código "${codigoFormatado}" não encontrado no estoque!`)
+          }
+          bufferLeitor.current = ''
+        }
+      } else if (e.key.length === 1) {
+        bufferLeitor.current += e.key
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [estoqueCompleto, modoRemocao, modalAberto, calcAberto, carrinho])
+
+  // ==========================================
+  // 6. LÓGICA DA CALCULADORA
   // ==========================================
   const calcular = (expressao) => {
     try {
@@ -132,7 +223,7 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // 6. FINALIZAR A VENDA (MOTOR DE DEDUÇÃO PEPS)
+  // 7. FINALIZAR A VENDA (MOTOR DE DEDUÇÃO PEPS)
   // ==========================================
   const finalizarCompra = async () => {
     if (metodo === 'dinheiro' && (valorRecebido === '' || parseFloat(valorRecebido) < total)) {
@@ -200,6 +291,7 @@ export default function Pdv() {
 
       alert("✅ Venda finalizada com sucesso!")
       setCarrinho([])
+      setUltimoProduto(null)
       setModalAberto(false)
       setValorRecebido('')
       setMetodo('pix')
@@ -213,12 +305,20 @@ export default function Pdv() {
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-gray-100 font-sans relative">
+    <div className={`flex flex-col md:flex-row h-screen bg-gray-100 font-sans relative transition-all duration-300 ${modoRemocao ? 'ring-8 ring-red-500 inset-0' : ''}`}>
       
+      {/* ALERTA DE MODO REMOÇÃO ATIVO */}
+      {modoRemocao && (
+        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white font-bold py-2 px-4 text-center z-50 flex items-center justify-center gap-2 shadow-lg animate-pulse">
+          <MinusCircle size={20} />
+          <span>MODO REMOÇÃO ATIVO! O próximo bipe ou clique irá subtrair 1 unidade do carrinho. (Aperte ESPAÇO para cancelar)</span>
+        </div>
+      )}
+
       {/* =========================================
           LADO ESQUERDO: BUSCA E LISTA DE PRODUTOS
           ========================================= */}
-      <div className="flex-1 flex flex-col h-[60vh] md:h-full relative">
+      <div className="flex-1 flex flex-col h-[60vh] md:h-full relative pt-2">
         
         {/* CABEÇALHO */}
         <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10">
@@ -235,7 +335,7 @@ export default function Pdv() {
           </button>
         </header>
 
-        {/* BARRA DE BUSCA COM ACIONAMENTO TURBO DA CÂMERA */}
+        {/* BARRA DE BUSCA E CÂMERA (Câmera visível apenas em Mobile) */}
         <div className="p-4 bg-gray-50 border-b border-gray-200 z-20 relative">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -247,14 +347,16 @@ export default function Pdv() {
               <span className="absolute left-4 top-4 text-2xl">🔍</span>
             </div>
             
-            {/* DISPARADOR DO MODAL DE CAMERA INTEGRADO */}
-            <button 
-              onClick={() => setCameraAtiva(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-5 rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-95"
-              title="Ativar Modo Câmera"
-            >
-              <Camera size={24} />
-            </button>
+            {/* BOTÃO DA CÂMERA - APENAS EM CELULAR/TABLET */}
+            {isMobile && (
+              <button 
+                onClick={() => setCameraAtiva(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-95"
+                title="Ativar Modo Câmera"
+              >
+                <Camera size={24} />
+              </button>
+            )}
           </div>
 
           {resultadosBusca.length > 0 && (
@@ -304,9 +406,36 @@ export default function Pdv() {
       </div>
 
       {/* =========================================
-          LADO DIREITO: TOTAL E COBRAR
+          LADO DIREITO: ÚLTIMO PRODUTO + TOTAL + COBRAR
           ========================================= */}
-      <div className="w-full md:w-96 bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-[40vh] md:h-full z-20">
+      <div className="w-full md:w-96 bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-auto md:h-full z-20">
+        
+        {/* CARD DO ÚLTIMO PRODUTO BIPADO */}
+        <div className="p-4 bg-gray-50 border-b border-gray-200">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Último Item Bipado</p>
+          {ultimoProduto ? (
+            <div className="flex items-center gap-4 bg-white p-3 rounded-2xl shadow-sm border border-gray-100 animate-in fade-in">
+              <div className="w-20 h-20 bg-gray-100 rounded-xl overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center">
+                {ultimoProduto.imagem_url ? (
+                  <img src={ultimoProduto.imagem_url} alt={ultimoProduto.nome} className="w-full h-full object-cover" />
+                ) : (
+                  <ShoppingBag size={32} className="text-gray-300" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h4 className="font-bold text-gray-800 text-sm truncate">{ultimoProduto.nome}</h4>
+                <p className="text-xs text-gray-400 mt-0.5">Cód: {ultimoProduto.codigo_barras || 'N/A'}</p>
+                <p className="text-green-600 font-bold text-lg mt-1">R$ {Number(ultimoProduto.preco_venda).toFixed(2)}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-24 bg-white rounded-2xl border border-dashed border-gray-200 flex items-center justify-center text-gray-400 text-xs font-medium">
+              Aguardando bipagem...
+            </div>
+          )}
+        </div>
+
+        {/* VALORES DO SUBTOTAL E TOTAL */}
         <div className="p-6 flex-1 flex flex-col justify-center">
           <div className="flex justify-between text-gray-500 mb-2"><span>Subtotal</span><span>R$ {total.toFixed(2)}</span></div>
           <div className="flex justify-between items-end border-t border-dashed border-gray-300 pt-4 mt-2">
@@ -315,7 +444,8 @@ export default function Pdv() {
           </div>
         </div>
 
-        <div className="p-6 bg-gray-50">
+        {/* BOTÃO COBRAR */}
+        <div className="p-6 bg-gray-50 border-t border-gray-100">
           <button 
             disabled={carrinho.length === 0}
             onClick={() => setModalAberto(true)}
@@ -327,7 +457,7 @@ export default function Pdv() {
       </div>
 
       {/* =========================================
-          CHAMADA REUTILIZÁVEL DO LEITOR INTERATIVO TURBO
+          LEITOR INTERATIVO TURBO (MOBILE)
           ========================================= */}
       {cameraAtiva && (
         <LeitorInterativo 
