@@ -7,7 +7,7 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
-import RegistroIA from './pages/RegistroIA' // ← Importação da IA adicionada aqui!
+import RegistroIA from './pages/RegistroIA'
 import OrganizacaoCatalogo from './pages/OrganizacaoCatalogo'
 import Estoque from './pages/Estoque'
 import Financeiro from './pages/Financeiro'
@@ -15,6 +15,7 @@ import TesteImpressora from './pages/TesteImpressora'
 import Equipe from './pages/Equipe'
 import CaixaHome from './pages/CaixaHome'
 import Pdv from './pages/Pdv'
+import Fiado from './pages/Fiado' // ← 1. Importação da tela de Fiado adicionada aqui!
 import InstalacaoBanner from './components/InstalacaoBanner' 
 
 export default function App() {
@@ -94,7 +95,7 @@ export default function App() {
           {/* Rotas do Admin */}
           <Route path="/admin-home" element={<AdminHome />} />
           <Route path="/cadastro-produto" element={<CadastroProduto />} />
-          <Route path="/registro-ia" element={<RegistroIA />} /> {/* ← Rota da IA adicionada aqui! */}
+          <Route path="/registro-ia" element={<RegistroIA />} />
           <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
           <Route path="/estoque" element={<Estoque />} />
           <Route path="/financeiro" element={<Financeiro />} />
@@ -105,8 +106,9 @@ export default function App() {
           <Route path="/caixa" element={<CaixaHome />} />
         </Route>
         
-        {/* PDV (Fora do layout para usar a tela cheia e girar no celular) */}
+        {/* Telas Fullscreen (Fora do layout padrão para otimização de espaço) */}
         <Route path="/pdv" element={<Pdv />} />
+        <Route path="/fiado" element={<Fiado />} /> {/* ← 2. Rota do Fiado adicionada aqui! */}
         
         {/* Se digitar uma rota que não existe, manda de volta pra Home */}
         <Route path="*" element={<Navigate to="/" replace />} />
