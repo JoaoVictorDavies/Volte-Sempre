@@ -370,20 +370,31 @@ export default function Pdv() {
 
       {/* LADO ESQUERDO: BUSCA E LISTA DE PRODUTOS */}
       <div className="flex-1 flex flex-col h-[60vh] md:h-full relative pt-2">
-        <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10">
+        <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10 overflow-x-auto">
           <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/caixa')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg">← Painel</button>
-            <h1 className="text-xl font-bold text-blue-700">Caixa: {sessaoAtiva?.operador || 'Carregando...'}</h1>
+            <button onClick={() => navigate('/caixa')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg shrink-0">← Painel</button>
+            <h1 className="text-xl font-bold text-blue-700 whitespace-nowrap hidden sm:block">Caixa: {sessaoAtiva?.operador || '...'}</h1>
           </div>
+          
           <div className="flex gap-2">
+            {/* NOVO BOTÃO DE FIADO AQUI */}
+            <button 
+              onClick={() => navigate('/fiado')} 
+              className="text-gray-600 hover:text-blue-700 font-bold px-3 py-2 bg-gray-100 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200 text-sm flex items-center gap-1.5 shrink-0"
+              title="Abrir Caderneta de Fiado"
+            >
+              📓 <span className="hidden md:inline">Fiados</span>
+            </button>
+            
             <button 
               onClick={() => {
                 if(window.confirm("Deseja realmente cancelar toda a venda atual?")) { setCarrinho([]); setUltimoProduto(null); }
               }} 
-              className="text-red-500 hover:text-red-700 font-bold px-4 py-2 hover:bg-red-50 rounded-lg transition-colors border border-red-200"
-            >Limpar Caixa</button>
-            <button onClick={() => setCalcAberto(true)} className="text-white font-bold px-5 py-2 bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 transition-colors">
-              🧮 Calculadora
+              className="text-red-500 hover:text-red-700 font-bold px-3 py-2 hover:bg-red-50 rounded-lg transition-colors border border-red-200 text-sm shrink-0"
+            >Limpar</button>
+            
+            <button onClick={() => setCalcAberto(true)} className="text-white font-bold px-3 py-2 bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 transition-colors text-sm shrink-0">
+              🧮 Calc
             </button>
           </div>
         </header>
