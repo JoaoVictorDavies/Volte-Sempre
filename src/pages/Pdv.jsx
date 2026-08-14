@@ -30,10 +30,10 @@ export default function Pdv() {
   // ==========================================
   // REF: MÁGICA DE SINCRONIZAÇÃO EM TEMPO REAL
   // ==========================================
-  const clientId = useRef(Math.random().toString(36).substring(7)) // Identificador único deste aparelho
-  const channelRef = useRef(null) // Referência do canal de comunicação do Supabase
-  const bloquearBroadcast = useRef(false) // Evita loop infinito de mensagens
-  const carrinhoRef = useRef(carrinho) // Mantém estado atualizado para enviar aos outros
+  const clientId = useRef(Math.random().toString(36).substring(7)) 
+  const channelRef = useRef(null) 
+  const bloquearBroadcast = useRef(false) 
+  const carrinhoRef = useRef(carrinho) 
   const ultimoProdutoRef = useRef(ultimoProduto)
 
   const bufferLeitor = useRef('')
@@ -45,7 +45,6 @@ export default function Pdv() {
   const faltaPagar = Math.max(0, total - totalRecebido)
   const troco = Math.max(0, totalRecebido - total)
 
-  // Mantém as referências sempre atualizadas para quando outro dispositivo pedir sincronização
   useEffect(() => { carrinhoRef.current = carrinho }, [carrinho])
   useEffect(() => { ultimoProdutoRef.current = ultimoProduto }, [ultimoProduto])
 
@@ -70,26 +69,22 @@ export default function Pdv() {
     setSessaoAtiva(sessaoObjeto)
     carregarEstoque()
 
-    // Recupera o carrinho local antes de conectar
     const carrinhoSalvo = localStorage.getItem('volte_pdv_carrinho')
     if (carrinhoSalvo) try { setCarrinho(JSON.parse(carrinhoSalvo)) } catch (e) {}
 
     const ultimoProdutoSalvo = localStorage.getItem('volte_pdv_ultimo')
     if (ultimoProdutoSalvo) try { setUltimoProduto(JSON.parse(ultimoProdutoSalvo)) } catch (e) {}
 
-    // --- INICIA O CANAL PRIVADO DE COMUNICAÇÃO DESTE CAIXA ---
     const myChannel = supabase.channel(`pdv_sync_${sessaoObjeto.id}`)
 
-    // 1. Escuta quando outro dispositivo envia uma atualização de carrinho
     myChannel.on('broadcast', { event: 'sync_cart' }, (payload) => {
       if (payload.payload.clientId !== clientId.current) {
-        bloquearBroadcast.current = true // Bloqueia para eu não reenviar o que acabei de receber
+        bloquearBroadcast.current = true 
         setCarrinho(payload.payload.carrinho)
         setUltimoProduto(payload.payload.ultimoProduto)
       }
     })
 
-    // 2. Escuta quando um NOVO dispositivo entra e pede o carrinho atual
     myChannel.on('broadcast', { event: 'request_sync' }, (payload) => {
       if (payload.payload.clientId !== clientId.current && carrinhoRef.current.length > 0) {
         myChannel.send({
@@ -99,33 +94,25 @@ export default function Pdv() {
         })
       }
     }).subscribe((status) => {
-      // 3. Assim que eu conectar, pergunto aos outros se eles têm um carrinho mais atualizado
       if (status === 'SUBSCRIBED') {
         myChannel.send({ type: 'broadcast', event: 'request_sync', payload: { clientId: clientId.current } })
       }
     })
 
     channelRef.current = myChannel
-
     return () => { supabase.removeChannel(myChannel) }
   }, [navigate])
 
-  // ==========================================
-  // 2. BROADCAST: ENVIAR PARA OUTRAS TELAS E SALVAR LOCAL
-  // ==========================================
   useEffect(() => {
-    // 1. Salva localmente (Proteção contra queda de energia)
     localStorage.setItem('volte_pdv_carrinho', JSON.stringify(carrinho))
     if (ultimoProduto) localStorage.setItem('volte_pdv_ultimo', JSON.stringify(ultimoProduto))
     else localStorage.removeItem('volte_pdv_ultimo')
 
-    // 2. Se a mudança veio da rede, não reenvia (evita loop)
     if (bloquearBroadcast.current) {
       bloquearBroadcast.current = false
       return
     }
 
-    // 3. Avisa todos os outros dispositivos sobre a alteração!
     if (channelRef.current && channelRef.current.state === 'joined') {
       channelRef.current.send({
         type: 'broadcast',
@@ -135,18 +122,12 @@ export default function Pdv() {
     }
   }, [carrinho, ultimoProduto])
 
-  // ==========================================
-  // 3. REGRA: AUTO-REMOVER ÚLTIMO PRODUTO BIPADO
-  // ==========================================
   useEffect(() => {
     if (ultimoProduto && !carrinho.find(item => item.id === ultimoProduto.id)) {
       setUltimoProduto(null)
     }
   }, [carrinho, ultimoProduto])
 
-  // ==========================================
-  // 4. CARREGAR ESTOQUE DO BANCO
-  // ==========================================
   const carregarEstoque = async () => {
     try {
       const { data, error } = await supabase.from('produtos').select('*, estoque_lotes(*)')
@@ -164,9 +145,6 @@ export default function Pdv() {
     }
   }
 
-  // ==========================================
-  // 5. LÓGICA DE BUSCA, ADICIONAR E REMOVER
-  // ==========================================
   useEffect(() => {
     if (busca.trim() === '') {
       setResultadosBusca([])
@@ -226,9 +204,6 @@ export default function Pdv() {
 
   const removerDoCarrinho = (id) => setCarrinho(prev => prev.filter(item => item.id !== id))
 
-  // ==========================================
-  // 6. OUVINTE DO LEITOR DE CÓDIGO & TECLA ESPAÇO
-  // ==========================================
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (modalAberto || calcAberto) return
@@ -260,9 +235,6 @@ export default function Pdv() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [estoqueCompleto, modoRemocao, modalAberto, calcAberto, carrinho])
 
-  // ==========================================
-  // 7. LÓGICAS DE PAGAMENTOS E CALCULADORA
-  // ==========================================
   const calcular = (expressao) => {
     try {
       const expressaoLimpa = expressao.replace(/[^-()\d/*+.]/g, '')
@@ -284,9 +256,6 @@ export default function Pdv() {
   const removerPagamento = (id) => setPagamentos(pagamentos.filter(p => p.id !== id))
   const abrirModalPagamento = () => { setPagamentos([]); setModalAberto(true) }
 
-  // ==========================================
-  // 8. FINALIZAR COMPRA (AQUI SIM, DEDUZ DO BANCO!)
-  // ==========================================
   const finalizarCompra = async () => {
     if (totalRecebido < total) {
       alert("O valor recebido ainda não cobre o total da compra!")
@@ -355,9 +324,6 @@ export default function Pdv() {
     }
   }
 
-  // =========================================================================
-  // RENDERIZAÇÃO
-  // =========================================================================
   return (
     <div className={`flex flex-col md:flex-row h-screen bg-gray-100 font-sans relative transition-all duration-300 ${modoRemocao ? 'ring-8 ring-red-500 inset-0' : ''}`}>
       
@@ -368,7 +334,7 @@ export default function Pdv() {
         </div>
       )}
 
-      {/* LADO ESQUERDO: BUSCA E LISTA DE PRODUTOS */}
+      {/* LADO ESQUERDO */}
       <div className="flex-1 flex flex-col h-[60vh] md:h-full relative pt-2">
         <header className="bg-white p-4 shadow-sm flex justify-between items-center z-10 overflow-x-auto">
           <div className="flex items-center gap-4">
@@ -377,15 +343,6 @@ export default function Pdv() {
           </div>
           
           <div className="flex gap-2">
-            {/* NOVO BOTÃO DE FIADO AQUI */}
-            <button 
-              onClick={() => navigate('/fiado')} 
-              className="text-gray-600 hover:text-blue-700 font-bold px-3 py-2 bg-gray-100 hover:bg-blue-50 rounded-lg transition-colors border border-gray-200 text-sm flex items-center gap-1.5 shrink-0"
-              title="Abrir Caderneta de Fiado"
-            >
-              📓 <span className="hidden md:inline">Fiados</span>
-            </button>
-            
             <button 
               onClick={() => {
                 if(window.confirm("Deseja realmente cancelar toda a venda atual?")) { setCarrinho([]); setUltimoProduto(null); }
@@ -454,7 +411,7 @@ export default function Pdv() {
         </div>
       </div>
 
-      {/* LADO DIREITO: ÚLTIMO PRODUTO + TOTAL + COBRAR */}
+      {/* LADO DIREITO */}
       <div className="w-full md:w-[450px] bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-auto md:h-full z-20">
         
         <div className="p-6 bg-gray-50 border-b border-gray-200">
@@ -496,7 +453,6 @@ export default function Pdv() {
 
       {cameraAtiva && <LeitorInterativo catalogo={estoqueCompleto} aoConfirmar={(produto) => adicionarAoCarrinho(produto)} aoFechar={() => setCameraAtiva(false)} />}
 
-      {/* MODAL DE PAGAMENTO MÚLTIPLO */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -558,12 +514,11 @@ export default function Pdv() {
         </div>
       )}
 
-      {/* CALCULADORA MODAL */}
       {calcAberto && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
             <header className="bg-gray-800 p-4 text-white flex justify-between items-center">
-              <h2 className="text-xl font-bold">🧮 Calculadora</h2>
+              <h2 className="text-xl font-bold"> Calculadora</h2>
               <button onClick={() => setCalcAberto(false)} className="text-gray-400 hover:text-white transition-colors"><X size={28} /></button>
             </header>
             <div className="p-6">
