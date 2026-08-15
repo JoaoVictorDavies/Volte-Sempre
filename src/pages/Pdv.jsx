@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Camera, MinusCircle, ShoppingBag, X } from 'lucide-react'
+import { Camera, MinusCircle, ShoppingBag, X, Receipt } from 'lucide-react'
 import LeitorInterativo from '../components/LeitorInterativo'
 
 export default function Pdv() {
@@ -13,19 +13,21 @@ export default function Pdv() {
   const [estoqueCompleto, setEstoqueCompleto] = useState([])
   const [resultadosBusca, setResultadosBusca] = useState([])
   
-  // Novo Estado: Último Produto Bipado
+  // Estados do PDV e Telas
   const [ultimoProduto, setUltimoProduto] = useState(null)
   const [modoRemocao, setModoRemocao] = useState(false)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
 
-  // Estados dos Modals e Ferramentas
-  const [calcAberto, setCalcAberto] = useState(false)
-  const [calcDisplay, setCalcDisplay] = useState('')
+  // Estados dos Modals, Pagamentos e Extrato
   const [modalAberto, setModalAberto] = useState(false)
   const [pagamentos, setPagamentos] = useState([]) 
   const [processandoVenda, setProcessandoVenda] = useState(false)
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
   const [cameraAtiva, setCameraAtiva] = useState(false)
+  
+  // NOVO: Estados do Extrato (Comprovante)
+  const [ultimaVenda, setUltimaVenda] = useState(null)
+  const [modalExtratoAberto, setModalExtratoAberto] = useState(false)
 
   // ==========================================
   // REF: MÁGICA DE SINCRONIZAÇÃO EM TEMPO REAL
@@ -217,7 +219,8 @@ export default function Pdv() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (modalAberto || calcAberto) return
+      // Modificado para não acionar se o modal do Extrato também estiver aberto
+      if (modalAberto || modalExtratoAberto) return
 
       if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
         e.preventDefault()
@@ -244,16 +247,7 @@ export default function Pdv() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [estoqueCompleto, modoRemocao, modalAberto, calcAberto, carrinho])
-
-  const calcular = (expressao) => {
-    try {
-      const expressaoLimpa = expressao.replace(/[^-()\d/*+.]/g, '')
-      if (!expressaoLimpa) return
-      const resultado = new Function('return ' + expressaoLimpa)()
-      setCalcDisplay(Number.isInteger(resultado) ? String(resultado) : resultado.toFixed(2))
-    } catch (e) { setCalcDisplay('Erro') }
-  }
+  }, [estoqueCompleto, modoRemocao, modalAberto, modalExtratoAberto, carrinho])
 
   const adicionarPagamento = (tipo) => {
     if (faltaPagar <= 0) return 
@@ -319,6 +313,17 @@ export default function Pdv() {
         }
       }
 
+      // SALVA O EXTRATO DA VENDA PARA O MODAL DE COMPROVANTE
+      setUltimaVenda({
+        id: vendaCadastrada.id,
+        total: total,
+        valor_recebido: totalRecebido,
+        troco: troco > 0 ? troco : 0,
+        metodo_pagamento: nomesMetodos,
+        itens: [...carrinho],
+        data: new Date()
+      })
+
       alert("✅ Venda finalizada com sucesso!")
       
       setCarrinho([])
@@ -361,8 +366,14 @@ export default function Pdv() {
               className="text-red-500 hover:text-red-700 font-bold px-3 py-2 hover:bg-red-50 rounded-lg transition-colors border border-red-200 text-sm shrink-0"
             >Limpar</button>
             
-            <button onClick={() => setCalcAberto(true)} className="text-white font-bold px-3 py-2 bg-blue-600 rounded-lg shadow-md hover:bg-blue-700 transition-colors text-sm shrink-0">
-              🧮 Calc
+            {/* NOVO BOTÃO DE EXTRATO (SUBSTITUIU A CALCULADORA) */}
+            <button 
+              onClick={() => setModalExtratoAberto(true)} 
+              disabled={!ultimaVenda}
+              className={`font-bold px-3 py-2 rounded-lg shadow-md transition-colors text-sm shrink-0 flex items-center gap-2 ${ultimaVenda ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+              title={!ultimaVenda ? "Nenhuma venda finalizada nesta sessão ainda" : "Ver comprovante da última venda"}
+            >
+              <Receipt size={18} /> Extrato
             </button>
           </div>
         </header>
@@ -464,6 +475,7 @@ export default function Pdv() {
 
       {cameraAtiva && <LeitorInterativo catalogo={estoqueCompleto} aoConfirmar={(produto) => adicionarAoCarrinho(produto)} aoFechar={() => setCameraAtiva(false)} />}
 
+      {/* MODAL DE PAGAMENTO */}
       {modalAberto && (
         <div className="fixed inset-0 bg-black/70 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -535,29 +547,59 @@ export default function Pdv() {
         </div>
       )}
 
-      {calcAberto && (
+      {/* NOVO MODAL DE EXTRATO / COMPROVANTE */}
+      {modalExtratoAberto && ultimaVenda && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col">
-            <header className="bg-gray-800 p-4 text-white flex justify-between items-center">
-              <h2 className="text-xl font-bold"> Calculadora</h2>
-              <button onClick={() => setCalcAberto(false)} className="text-gray-400 hover:text-white transition-colors"><X size={28} /></button>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col relative font-mono text-gray-800">
+            {/* Efeito de serra no topo do cupom */}
+            <div className="absolute top-0 left-0 right-0 h-3 bg-gray-800 flex justify-around">
+               {[...Array(20)].map((_, i) => <div key={i} className="w-2 h-2 bg-white rounded-full -mt-1"></div>)}
+            </div>
+            
+            <header className="pt-8 pb-4 text-center border-b border-dashed border-gray-300 mx-6">
+              <h2 className="text-xl font-black uppercase tracking-widest mb-1">Volte</h2>
+              <h3 className="text-sm font-bold text-gray-500 uppercase">Comprovante de Venda</h3>
+              <p className="text-xs text-gray-400 mt-2">{ultimaVenda.data.toLocaleDateString('pt-BR')} às {ultimaVenda.data.toLocaleTimeString('pt-BR')}</p>
             </header>
-            <div className="p-6">
-               <div className="bg-gray-100 p-4 rounded-xl text-right text-3xl font-mono mb-6 overflow-x-auto text-gray-800 min-h-[72px] flex items-center justify-end border-2 border-gray-200 shadow-inner">{calcDisplay || '0'}</div>
-               <div className="grid grid-cols-2 gap-3 mb-4">
-                 <button onClick={() => calcular(calcDisplay + '/2')} className="bg-purple-100 text-purple-700 font-bold py-3 rounded-xl hover:bg-purple-200 transition-colors shadow-sm">Dividir por 2</button>
-                 <button onClick={() => calcular(calcDisplay + '/3')} className="bg-purple-100 text-purple-700 font-bold py-3 rounded-xl hover:bg-purple-200 transition-colors shadow-sm">Dividir por 3</button>
-               </div>
-               <div className="grid grid-cols-4 gap-3">
-                  {['7','8','9','/','4','5','6','*','1','2','3','-','C','0','.','+'].map(btn => (
-                    <button key={btn} onClick={() => { if(btn === 'C') setCalcDisplay(''); else setCalcDisplay(prev => prev === 'Erro' ? btn : prev + btn) }} className={`p-4 rounded-xl font-bold text-xl transition-colors shadow-sm ${btn === 'C' ? 'bg-red-100 text-red-600 border border-red-200 hover:bg-red-200' : 'bg-gray-50 hover:bg-gray-200 text-gray-800 border border-gray-200'}`}>{btn}</button>
-                  ))}
-                  <button onClick={() => calcular(calcDisplay)} className="col-span-4 bg-blue-600 text-white font-bold py-4 rounded-xl hover:bg-blue-700 mt-2 shadow-md text-xl">=</button>
-               </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[50vh] scrollbar-thin">
+              <div className="space-y-3 mb-6">
+                {ultimaVenda.itens.map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-start text-sm">
+                    <span className="flex-1 pr-2 truncate">{item.qtd}x {item.nome}</span>
+                    <span className="font-bold">R$ {(item.qtd * item.preco_venda).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-dashed border-gray-300 pt-4 space-y-2">
+                <div className="flex justify-between font-black text-lg">
+                  <span>TOTAL</span>
+                  <span>R$ {ultimaVenda.total.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-sm text-gray-500">
+                  <span className="uppercase">PAGO VIA {ultimaVenda.metodo_pagamento}</span>
+                  <span>R$ {ultimaVenda.valor_recebido.toFixed(2)}</span>
+                </div>
+                {ultimaVenda.troco > 0 && (
+                  <div className="flex justify-between text-sm font-bold text-gray-600 pt-2 border-t border-dashed border-gray-200">
+                    <span>TROCO DEVOLVIDO</span>
+                    <span>R$ {ultimaVenda.troco.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Efeito de serra no rodapé do cupom */}
+            <div className="p-4 bg-gray-50 border-t border-gray-200 relative">
+               <button onClick={() => setModalExtratoAberto(false)} className="w-full bg-blue-600 text-white font-bold font-sans py-3 rounded-xl hover:bg-blue-700 transition-colors shadow-md">
+                 Fechar Comprovante
+               </button>
             </div>
           </div>
         </div>
       )}
+
     </div>
   )
 }

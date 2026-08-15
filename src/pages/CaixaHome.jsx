@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Lock, Unlock, LogOut, ShieldAlert, ArrowRight, Printer } from 'lucide-react'
+import { Lock, Unlock, LogOut, ShieldAlert, ArrowRight, Printer, BookOpen } from 'lucide-react'
 import ThermalPrinterEncoder from 'thermal-printer-encoder'
 
 export default function CaixaHome() {
@@ -105,25 +105,31 @@ export default function CaixaHome() {
   }
 
   // ==========================================
-  // 3. FECHAR CAIXA (Funcionário ou Admin)
+  // 3. FECHAR CAIXA (Aprimorado com mais dados)
   // ==========================================
   const fecharCaixa = async (sessaoParaFechar) => {
     if (!confirm("Tem certeza que deseja encerrar este caixa?")) return
     
     setCarregando(true)
     try {
-      // Puxa vendas desta sessão
+      // Puxa vendas e troco desta sessão
       const { data: vendas } = await supabase
         .from('vendas')
-        .select('total, metodo_pagamento')
+        .select('total, metodo_pagamento, troco')
         .eq('sessao_id', sessaoParaFechar.id)
 
       const vendasProcessadas = vendas || []
       
+      // Filtros mais robustos para não bugar em pagamentos mistos (ex: "pix, dinheiro")
       const totalDinheiro = vendasProcessadas.filter(v => v.metodo_pagamento === 'dinheiro').reduce((acc, v) => acc + Number(v.total), 0)
       const totalPix = vendasProcessadas.filter(v => v.metodo_pagamento === 'pix').reduce((acc, v) => acc + Number(v.total), 0)
       const totalCartao = vendasProcessadas.filter(v => ['credito', 'debito'].includes(v.metodo_pagamento)).reduce((acc, v) => acc + Number(v.total), 0)
-      const totalGeral = totalDinheiro + totalPix + totalCartao
+      const totalMisto = vendasProcessadas.filter(v => v.metodo_pagamento.includes(',')).reduce((acc, v) => acc + Number(v.total), 0)
+
+      // Totais Globais
+      const totalGeral = vendasProcessadas.reduce((acc, v) => acc + Number(v.total), 0)
+      const totalTroco = vendasProcessadas.reduce((acc, v) => acc + Number(v.troco || 0), 0)
+      const ticketMedio = vendasProcessadas.length > 0 ? totalGeral / vendasProcessadas.length : 0
 
       const dataFechamento = new Date().toISOString()
 
@@ -139,12 +145,18 @@ export default function CaixaHome() {
           operador: sessaoParaFechar.operador,
           aberto_em: sessaoParaFechar.aberto_em,
           fechado_em: dataFechamento,
-          dinheiro: totalDinheiro, pix: totalPix, cartao: totalCartao, geral: totalGeral, qtdVendas: vendasProcessadas.length
+          dinheiro: totalDinheiro, 
+          pix: totalPix, 
+          cartao: totalCartao, 
+          misto: totalMisto,
+          geral: totalGeral, 
+          qtdVendas: vendasProcessadas.length,
+          ticketMedio: ticketMedio,
+          trocoTotal: totalTroco
         })
         localStorage.removeItem('volte_sessao_caixa')
         setSessaoAtiva(null)
       } else {
-        // Se for admin, atualiza a lista de caixas e avisa
         alert(`Caixa de ${sessaoParaFechar.operador} encerrado com sucesso.`)
         setSessoesAdmin(prev => prev.filter(s => s.id !== sessaoParaFechar.id))
       }
@@ -204,7 +216,7 @@ export default function CaixaHome() {
       // 2. Monta o layout do Ticket
       const encoder = new ThermalPrinterEncoder({ language: 'esc-pos', width: 32 });
       
-      const dados = encoder
+      let dados = encoder
         .initialize()
         .align('center')
         .bold(true)
@@ -222,7 +234,16 @@ export default function CaixaHome() {
         .newline()
         .line(`DINHEIRO: R$ ${resumoFechamento.dinheiro.toFixed(2)}`)
         .line(`PIX:      R$ ${resumoFechamento.pix.toFixed(2)}`)
-        .line(`CARTOES:  R$ ${resumoFechamento.cartao.toFixed(2)}`)
+        .line(`CARTOES:  R$ ${resumoFechamento.cartao.toFixed(2)}`);
+        
+      if (resumoFechamento.misto > 0) {
+        dados = dados.line(`MISTO:    R$ ${resumoFechamento.misto.toFixed(2)}`);
+      }
+
+      dados = dados
+        .line('--------------------------------')
+        .line(`TICKET MEDIO: R$ ${resumoFechamento.ticketMedio.toFixed(2)}`)
+        .line(`TROCO DADO:   R$ ${resumoFechamento.trocoTotal.toFixed(2)}`)
         .line('--------------------------------')
         .align('center')
         .bold(true)
@@ -241,7 +262,7 @@ export default function CaixaHome() {
         .newline()
         .encode();
 
-      // 3. Envia fatiado (Chunking para evitar engasgo do Bluetooth mobile)
+      // 3. Envia fatiado (Chunking)
       const chunkSize = 100;
       for (let i = 0; i < dados.length; i += chunkSize) {
         const pedaco = dados.slice(i, i + chunkSize);
@@ -254,20 +275,19 @@ export default function CaixaHome() {
       console.error(error);
       alert("Falha: " + error.message);
       setPrinterStatus('Tentar Novamente');
-      printerCharRef.current = null; // Reseta a porta se deu erro
+      printerCharRef.current = null;
     }
   }
-
 
   // ==========================================
   // RENDERIZAÇÃO CONDICIONAL
   // ==========================================
   
-  // TELA 1: FECHAMENTO CONCLUÍDO (AGORA COM BOTÃO DE IMPRIMIR)
+  // TELA 1: FECHAMENTO CONCLUÍDO
   if (resumoFechamento) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl border border-gray-100 animate-in zoom-in">
+        <div className="w-full max-w-sm bg-white p-8 rounded-3xl shadow-xl border border-gray-100 animate-in zoom-in max-h-[95vh] overflow-y-auto scrollbar-thin">
           <div className="text-center mb-6">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Lock size={32} className="text-gray-800" />
@@ -276,9 +296,9 @@ export default function CaixaHome() {
             <p className="text-gray-500 mt-1">Sessão de {resumoFechamento.operador}</p>
           </div>
 
-          <div className="space-y-3 mb-8">
+          <div className="space-y-3 mb-8 text-sm">
             <div className="flex justify-between text-gray-600 border-b pb-2">
-              <span>Vendas Feitas</span>
+              <span>Qtd. Vendas Realizadas</span>
               <span className="font-bold">{resumoFechamento.qtdVendas}</span>
             </div>
             <div className="flex justify-between text-gray-600 border-b pb-2">
@@ -293,13 +313,31 @@ export default function CaixaHome() {
               <span>Cartões</span>
               <span className="font-bold text-gray-800">R$ {resumoFechamento.cartao.toFixed(2)}</span>
             </div>
+            {resumoFechamento.misto > 0 && (
+              <div className="flex justify-between text-gray-600 border-b pb-2">
+                <span>Pagamento Misto</span>
+                <span className="font-bold text-gray-800">R$ {resumoFechamento.misto.toFixed(2)}</span>
+              </div>
+            )}
+            
+            <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 my-2 space-y-1">
+              <div className="flex justify-between text-gray-500 text-xs">
+                <span>Ticket Médio (Gasto por venda)</span>
+                <span className="font-bold">R$ {resumoFechamento.ticketMedio.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-gray-500 text-xs">
+                <span>Troco Total Devolvido</span>
+                <span className="font-bold">R$ {resumoFechamento.trocoTotal.toFixed(2)}</span>
+              </div>
+            </div>
+
             <div className="flex justify-between text-xl pt-2">
-              <span className="font-bold text-gray-800">Total Geral</span>
-              <span className="font-bold text-green-600">R$ {resumoFechamento.geral.toFixed(2)}</span>
+              <span className="font-black text-gray-800">Total Faturado</span>
+              <span className="font-black text-green-600">R$ {resumoFechamento.geral.toFixed(2)}</span>
             </div>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 mt-auto">
             <button 
               onClick={imprimirFechamento}
               className="w-full bg-blue-100 text-blue-700 font-bold py-4 rounded-xl hover:bg-blue-200 transition-colors flex items-center justify-center gap-2"
@@ -319,7 +357,7 @@ export default function CaixaHome() {
     )
   }
 
-  // TELA 2: VISÃO DO ADMINISTRADOR (Painel de Controle)
+  // TELA 2: VISÃO DO ADMINISTRADOR
   if (usuario && usuario.cargo === 'admin') {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center py-20 px-4 animate-in fade-in">
@@ -373,13 +411,13 @@ export default function CaixaHome() {
       <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center justify-center p-4 animate-in fade-in">
         <div className="w-full max-w-sm flex flex-col items-center">
           
-          <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6">
+          <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6 shadow-sm">
             <span className="text-3xl font-bold">{usuario.nome.charAt(0)}</span>
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-1">Olá, {usuario.nome}</h2>
           
           {sessaoAtiva ? (
-            <div className="bg-green-50 border border-green-200 text-green-800 px-6 py-2 rounded-full font-bold mb-8 flex items-center gap-2">
+            <div className="bg-green-50 border border-green-200 text-green-800 px-6 py-2 rounded-full font-bold mb-8 flex items-center gap-2 shadow-sm">
               <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse"></span>
               Caixa Aberto
             </div>
@@ -387,13 +425,19 @@ export default function CaixaHome() {
             <p className="text-gray-500 mb-8">Nenhum caixa aberto no momento.</p>
           )}
 
-          <div className="flex flex-col gap-4 w-full">
+          <div className="flex flex-col gap-3 w-full">
             {sessaoAtiva ? (
               <>
-                <button onClick={() => navigate('/pdv')} className="bg-[#1D1D1F] hover:bg-black text-white font-bold py-5 rounded-2xl shadow-xl transition-all text-lg flex justify-center items-center gap-2">
+                <button onClick={() => navigate('/pdv')} className="bg-[#1D1D1F] hover:bg-black text-white font-bold py-4 rounded-2xl shadow-xl transition-all text-lg flex justify-center items-center gap-2">
                   <Unlock size={20}/> Retomar Vendas
                 </button>
-                <button onClick={() => fecharCaixa(sessaoAtiva)} disabled={carregando} className="bg-white hover:bg-red-50 border border-red-100 text-red-600 font-bold py-5 rounded-2xl transition-all">
+                
+                {/* NOVO BOTÃO DE FICHAS INSERIDO AQUI */}
+                <button onClick={() => navigate('/fichas')} className="bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 text-blue-700 font-bold py-4 rounded-2xl transition-all flex justify-center items-center gap-2 shadow-sm">
+                  <BookOpen size={20}/> Cadastrar Ficha
+                </button>
+
+                <button onClick={() => fecharCaixa(sessaoAtiva)} disabled={carregando} className="bg-white hover:bg-red-50 border border-gray-200 hover:border-red-200 text-red-500 hover:text-red-600 font-bold py-4 rounded-2xl transition-all shadow-sm">
                   {carregando ? 'Processando...' : 'Fechar Meu Caixa'}
                 </button>
               </>
@@ -403,7 +447,7 @@ export default function CaixaHome() {
               </button>
             )}
             
-            <button onClick={() => setUsuario(null)} className="text-gray-500 font-bold py-3 mt-4 hover:text-gray-800">
+            <button onClick={() => setUsuario(null)} className="text-gray-400 font-bold py-3 mt-2 hover:text-gray-800 transition-colors">
               Sair
             </button>
           </div>
@@ -417,8 +461,8 @@ export default function CaixaHome() {
     <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center justify-center p-4 animate-in fade-in">
       <div className="w-full max-w-sm">
         <div className="text-center mb-10">
-          <h1 className="text-4xl font-bold text-[#1D1D1F] tracking-tight mb-2">Ponto de Venda</h1>
-          <p className="text-[#86868B]">Insira seu PIN para acessar.</p>
+          <h1 className="text-4xl font-black text-[#1D1D1F] tracking-tight mb-2">Ponto de Venda</h1>
+          <p className="text-[#86868B] font-medium">Insira seu PIN para acessar.</p>
         </div>
         
         <form onSubmit={acessarComPin} className="bg-white p-8 rounded-3xl shadow-lg border border-gray-100">
