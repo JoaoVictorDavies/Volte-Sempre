@@ -25,7 +25,7 @@ export default function Pdv() {
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
   const [cameraAtiva, setCameraAtiva] = useState(false)
   
-  // NOVO: Estados do Extrato (Comprovante)
+  // Estados do Extrato (Comprovante)
   const [ultimaVenda, setUltimaVenda] = useState(null)
   const [modalExtratoAberto, setModalExtratoAberto] = useState(false)
 
@@ -141,6 +141,7 @@ export default function Pdv() {
     }
   }, [carrinho, ultimoProduto])
 
+  // MODIFICADO: Carrega TODOS os produtos, mesmo os zerados
   const carregarEstoque = async () => {
     try {
       const { data, error } = await supabase.from('produtos').select('*, estoque_lotes(*)')
@@ -150,8 +151,8 @@ export default function Pdv() {
         const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
         const estoqueTotal = lotesValidos.reduce((acc, l) => acc + l.quantidade_atual, 0)
         return { ...p, estoqueTotal }
-      }).filter(p => p.estoqueTotal > 0)
-
+      })
+      // Removido o filtro: .filter(p => p.estoqueTotal > 0) para permitir venda no negativo
       setEstoqueCompleto(estoqueProcessado)
     } catch (error) {
       console.error("Erro ao carregar estoque:", error)
@@ -189,12 +190,8 @@ export default function Pdv() {
       setCarrinho(prev => {
         const itemExistente = prev.find(item => item.id === produto.id)
         if (itemExistente) {
-          if (itemExistente.qtd < produto.estoqueTotal) {
-            return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item)
-          } else {
-            alert(`Atenção: Limite máximo em estoque (${produto.estoqueTotal} un) atingido!`)
-            return prev
-          }
+          // MODIFICADO: Retirada a trava de estoque limite na hora de bipar.
+          return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item)
         } else {
           return [...prev, { ...produto, qtd: 1 }]
         }
@@ -209,7 +206,8 @@ export default function Pdv() {
     setCarrinho(prev => prev.map(item => {
       if (item.id === id) {
         const novaQtd = item.qtd + delta
-        if (novaQtd > 0 && novaQtd <= item.estoqueTotal) return { ...item, qtd: novaQtd }
+        // MODIFICADO: Retirada a trava de estoque limite aqui também
+        if (novaQtd > 0) return { ...item, qtd: novaQtd }
       }
       return item
     }))
@@ -219,7 +217,6 @@ export default function Pdv() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // Modificado para não acionar se o modal do Extrato também estiver aberto
       if (modalAberto || modalExtratoAberto) return
 
       if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
@@ -238,7 +235,7 @@ export default function Pdv() {
           e.preventDefault()
           const produtoEncontrado = estoqueCompleto.find(p => p.codigo_barras === codigoFormatado)
           if (produtoEncontrado) processarBipProduto(produtoEncontrado)
-          else alert(`Produto com código "${codigoFormatado}" não encontrado no estoque!`)
+          else alert(`Produto com código "${codigoFormatado}" não encontrado no cadastro!`)
           bufferLeitor.current = ''
         }
       } else if (e.key.length === 1) {
@@ -261,6 +258,9 @@ export default function Pdv() {
   const removerPagamento = (id) => setPagamentos(pagamentos.filter(p => p.id !== id))
   const abrirModalPagamento = () => { setPagamentos([]); setModalAberto(true) }
 
+  // ==========================================
+  // FINALIZAÇÃO DE VENDA (COM AUTO-AJUSTE DE ESTOQUE NEGATIVO)
+  // ==========================================
   const finalizarCompra = async () => {
     if (totalRecebido < total) {
       alert("O valor recebido ainda não cobre o total da compra!")
@@ -297,6 +297,7 @@ export default function Pdv() {
           return new Date(a.criado_em) - new Date(b.criado_em);
         });
 
+        // Tenta baixar dos lotes existentes
         for (const lote of lotesOrdenados) {
           if (qtdRestanteParaBaixar <= 0) break;
           const qtdDeducao = Math.min(qtdRestanteParaBaixar, lote.quantidade_atual)
@@ -310,6 +311,28 @@ export default function Pdv() {
             preco_venda: item.preco_venda, loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
           }])
           qtdRestanteParaBaixar -= qtdDeducao
+        }
+
+        // SE AINDA FALTA BAIXAR (Venda no Negativo / Estoque Invisível)
+        if (qtdRestanteParaBaixar > 0) {
+          // Cria um lote "Fantasma/Ajuste" na hora com a quantidade que falta e já zera ele para concluir a venda
+          const { data: loteAjuste } = await supabase.from('estoque_lotes').insert([{
+            produto_id: item.id,
+            quantidade_inicial: qtdRestanteParaBaixar,
+            quantidade_atual: 0, // Já nasce zerado porque foi vendido na mesma hora
+            preco_custo: item.preco_venda * 0.5, // Puxa uma estimativa de 50% caso não tenha lote anterior
+            fornecedor: 'Ajuste Automático PDV',
+            status: 'esgotado'
+          }]).select().single()
+
+          // Registra o item na venda referenciando o preço desse lote fantasma
+          if (loteAjuste) {
+            await supabase.from('vendas_itens').insert([{
+              venda_id: vendaCadastrada.id, produto_id: item.id, nome: item.nome,
+              quantidade: qtdRestanteParaBaixar, preco_custo: loteAjuste.preco_custo, 
+              preco_venda: item.preco_venda, loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
+            }])
+          }
         }
       }
 
@@ -366,7 +389,6 @@ export default function Pdv() {
               className="text-red-500 hover:text-red-700 font-bold px-3 py-2 hover:bg-red-50 rounded-lg transition-colors border border-red-200 text-sm shrink-0"
             >Limpar</button>
             
-            {/* NOVO BOTÃO DE EXTRATO (SUBSTITUIU A CALCULADORA) */}
             <button 
               onClick={() => setModalExtratoAberto(true)} 
               disabled={!ultimaVenda}
@@ -397,7 +419,13 @@ export default function Pdv() {
                 <button key={p.id} onClick={() => adicionarAoCarrinho(p)} className="w-full text-left p-4 hover:bg-blue-50 border-b border-gray-100 flex justify-between items-center transition-colors">
                   <div>
                     <div className="font-bold text-gray-800">{p.nome}</div>
-                    <div className="text-sm text-gray-500">Estoque: {p.estoqueTotal} | Cód: {p.codigo_barras || 'N/A'}</div>
+                    {/* MODIFICADO: Aviso visual se o item for adicionado sem estoque */}
+                    <div className="text-sm flex gap-2">
+                       <span className={p.estoqueTotal > 0 ? "text-gray-500" : "text-red-500 font-bold"}>
+                         Estoque: {p.estoqueTotal}
+                       </span>
+                       <span className="text-gray-400">| Cód: {p.codigo_barras || 'N/A'}</span>
+                    </div>
                   </div>
                   <div className="font-bold text-green-600">R$ {Number(p.preco_venda).toFixed(2)}</div>
                 </button>
@@ -411,7 +439,12 @@ export default function Pdv() {
           {carrinho.map(item => (
             <div key={item.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="flex-1">
-                <h3 className="font-bold text-gray-800">{item.nome}</h3>
+                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                   {item.nome}
+                   {item.qtd > item.estoqueTotal && (
+                      <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full uppercase font-bold" title="Venda de produto com estoque baixo. Será ajustado automaticamente.">Sem Estoque</span>
+                   )}
+                </h3>
                 <p className="text-sm text-gray-500">R$ {Number(item.preco_venda).toFixed(2)} /unidade</p>
               </div>
               <div className="flex items-center gap-3">
@@ -547,7 +580,7 @@ export default function Pdv() {
         </div>
       )}
 
-      {/* NOVO MODAL DE EXTRATO / COMPROVANTE */}
+      {/* MODAL DE EXTRATO / COMPROVANTE */}
       {modalExtratoAberto && ultimaVenda && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col relative font-mono text-gray-800">
