@@ -54,6 +54,17 @@ export default function Pdv() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
+  // CORREÇÃO DA ROLAGEM MOUSE/TOUCHPAD EM INPUTS NUMÉRICOS
+  useEffect(() => {
+    const disableWheelOnNumberInputs = (e) => {
+      if (document.activeElement.type === 'number') {
+        e.preventDefault()
+      }
+    }
+    document.addEventListener('wheel', disableWheelOnNumberInputs, { passive: false })
+    return () => document.removeEventListener('wheel', disableWheelOnNumberInputs)
+  }, [])
+
   // ==========================================
   // 1. VERIFICAÇÃO DE SESSÃO E INÍCIO DA TELEPATIA (REALTIME)
   // ==========================================
@@ -494,7 +505,17 @@ export default function Pdv() {
                         <div className="bg-blue-50 text-blue-700 font-bold px-3 py-2 rounded-lg text-sm w-24 text-center capitalize">{pag.metodo}</div>
                         <div className="flex-1 relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">R$</span>
-                          <input type="number" autoFocus={index === pagamentos.length - 1} value={pag.valor} onChange={(e) => atualizarValorPagamento(pag.id, e.target.value)} className="w-full bg-gray-50 border border-gray-200 p-3 pl-10 rounded-xl font-bold text-lg text-gray-800 outline-none focus:bg-white focus:border-blue-400 transition-colors" />
+                          <input 
+                            type="number" 
+                            autoFocus={index === pagamentos.length - 1} 
+                            value={pag.valor} 
+                            onChange={(e) => atualizarValorPagamento(pag.id, e.target.value)} 
+                            onKeyDown={(e) => {
+                              // Se o usuário apertar Setas pra Cima/Baixo, bloqueia a mudança do número também
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
+                            }}
+                            className="w-full bg-gray-50 border border-gray-200 p-3 pl-10 rounded-xl font-bold text-lg text-gray-800 outline-none focus:bg-white focus:border-blue-400 transition-colors" 
+                          />
                         </div>
                         <button onClick={() => removerPagamento(pag.id)} className="w-12 h-12 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"><X size={24} /></button>
                       </div>
