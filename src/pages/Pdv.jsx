@@ -347,17 +347,13 @@ export default function Pdv() {
           const novoStatus = novaQtdLote === 0 ? 'esgotado' : 'ativo'
 
           await supabase.from('estoque_lotes').update({ quantidade_atual: novaQtdLote, status: novoStatus }).eq('id', lote.id)
-          if (novaQtdLote === 0) {
-  dispararNotificacao(
-    "⚠️ Produto Esgotado!", 
-    `O estoque de "${item.nome}" acabou de zerar no PDV. Providencie reposição!`
-  );
-}
+          
           await supabase.from('vendas_itens').insert([{
             venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
             quantidade: qtdDeducao, preco_custo: lote.preco_custo, 
             preco_venda: item.preco_venda, loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
           }])
+          
           qtdRestanteParaBaixar -= qtdDeducao
         }
 
@@ -382,6 +378,25 @@ export default function Pdv() {
             }])
           }
         }
+
+        // ==========================================
+        // INTELIGÊNCIA DE NOTIFICAÇÃO: AVISO DE ESTOQUE ZERADO
+        // ==========================================
+        // Após todas as deduções de lotes (reais e fantasmas) para esse item da venda,
+        // nós calculamos como ficou o estoque total dele.
+        // Como o item do carrinho guarda o 'estoqueTotal' que o produto TINHA antes da venda,
+        // o novo estoque será: (estoque anterior) - (quantidade vendida).
+        const estoqueTotalAnterior = item.estoqueTotal || 0;
+        const estoqueAtualCalculado = estoqueTotalAnterior - item.qtd;
+
+        // Se o estoque atual calculado ficou igual a 0 ou negativo, dispara o alerta!
+        // Não disparamos se o estoque já era 0 antes (senão toda venda no negativo avisa que zerou).
+        if (estoqueAtualCalculado <= 0 && estoqueTotalAnterior > 0) {
+          dispararNotificacao(
+            "⚠️ Produto Esgotado!", 
+            `Atenção! O estoque do produto "${item.nome}" acabou de zerar no caixa. Providencie reposição.`
+          );
+        }
       }
 
       // 4. SALVA EXTRATO
@@ -396,10 +411,14 @@ export default function Pdv() {
       })
 
       alert("✅ Venda finalizada com sucesso!")
-dispararNotificacao(
-  "💰 Nova Venda Fechada!", 
-  `Venda de R$ ${total.toFixed(2)} finalizada no caixa via ${nomesMetodos}.`
-);
+      
+      // Notificação aprimorada com o nome do operador do caixa
+      const operadorCaixa = sessaoAtiva ? sessaoAtiva.operador : 'Operador Desconhecido';
+      dispararNotificacao(
+        "💰 Nova Venda Fechada!", 
+        `Venda de R$ ${total.toFixed(2)} finalizada no caixa por ${operadorCaixa}. (Pgto: ${nomesMetodos})`
+      );
+
       setCarrinho([])
       setUltimoProduto(null)
       localStorage.removeItem('volte_pdv_carrinho')

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { Lock, Unlock, LogOut, ShieldAlert, ArrowRight, Printer, BookOpen } from 'lucide-react'
 import ThermalPrinterEncoder from 'thermal-printer-encoder'
+import { dispararNotificacao } from '../services/notificacoes' // ← Importação da Notificação
 
 export default function CaixaHome() {
   const navigate = useNavigate()
@@ -96,6 +97,16 @@ export default function CaixaHome() {
       if (error) throw error
 
       localStorage.setItem('volte_sessao_caixa', JSON.stringify(data))
+      
+      // ==========================================
+      // NOTIFICAÇÃO: CAIXA ABERTO
+      // ==========================================
+      const horaAbertura = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      dispararNotificacao(
+        "🟢 Caixa Aberto", 
+        `Caixa aberto por ${usuario.nome} às ${horaAbertura}. Que Deus abençoe sua jornada de trabalho e traga excelentes vendas! 🙏✨`
+      );
+
       navigate('/pdv') 
     } catch (error) {
       alert("Erro ao abrir caixa: " + error.message)
@@ -138,6 +149,15 @@ export default function CaixaHome() {
         .from('caixa_sessoes')
         .update({ status: 'fechado', fechado_em: dataFechamento })
         .eq('id', sessaoParaFechar.id)
+
+      // ==========================================
+      // NOTIFICAÇÃO: CAIXA FECHADO
+      // ==========================================
+      const horaFechamento = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      dispararNotificacao(
+        "🔴 Caixa Fechado", 
+        `Caixa de ${sessaoParaFechar.operador} fechado às ${horaFechamento}. Bom descanso e até amanhã! 🌙`
+      );
 
       // Exibe resumo apenas para o funcionário que fechou o próprio caixa
       if (usuario.cargo !== 'admin') {
