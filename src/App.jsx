@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import runOneSignal from './services/onesignal'
+import OneSignal from 'react-onesignal' 
 
 import Layout from './components/Layout'
 import Home from './pages/Home'
@@ -15,7 +15,7 @@ import TesteImpressora from './pages/TesteImpressora'
 import Equipe from './pages/Equipe'
 import CaixaHome from './pages/CaixaHome'
 import Pdv from './pages/Pdv'
-import Fiado from './pages/Fiado' // ← 1. Importação da tela de Fiado adicionada aqui!
+import Fiado from './pages/Fiado'
 import InstalacaoBanner from './components/InstalacaoBanner' 
 
 export default function App() {
@@ -27,33 +27,59 @@ export default function App() {
   const [senhaInput, setSenhaInput] = useState('')
   const [erro, setErro] = useState('')
 
+  // ==========================================
+  // INICIALIZAÇÃO DO ONESIGNAL VIA .ENV
+  // ==========================================
   useEffect(() => {
-    runOneSignal();
+    const iniciarOneSignal = async () => {
+      const appId = import.meta.env.VITE_ONESIGNAL_APP_ID;
+      
+      // Proteção: Se esquecer de colocar no .env, avisa no log e não quebra o app
+      if (!appId || appId === 'undefined') {
+        console.warn("⚠️ OneSignal App ID não encontrado no .env!");
+        return;
+      }
+
+      try {
+        await OneSignal.init({
+          appId: String(appId).trim(), 
+          allowLocalhostAsSecureOrigin: true, // Permite testar no localhost
+          notifyButton: {
+            enable: true, // Adiciona o sininho no canto da tela
+          },
+        });
+        
+        // Pede a permissão pro usuário assim que ele entra
+        OneSignal.Slidedown.promptPush();
+      } catch (error) {
+        console.error("Erro ao iniciar OneSignal:", error);
+      }
+    };
+
+    iniciarOneSignal();
   }, []);
 
   // Função da catraca global (BLINDADA CONTRA ERROS DO VERCEL E ESPAÇOS)
   const liberarAcesso = (e) => {
     e.preventDefault()
     
-    // Força a variável do .env a ser uma string, tira qualquer aspa perdida e remove espaços
     const senhaCorreta = String(import.meta.env.VITE_SENHA_GLOBAL || '').replace(/["']/g, '').trim()
-    const senhaDigitada = senhaInput.trim() // Tira espaços caso você tenha digitado sem querer
+    const senhaDigitada = senhaInput.trim() 
 
-    // Se a senha do .env não foi encontrada pelo Vite, avisa no erro
     if (!senhaCorreta || senhaCorreta === 'undefined') {
       setErro('Erro do servidor: Senha global não configurada no Vercel.')
       return
     }
 
     if (senhaDigitada === senhaCorreta) {
-      localStorage.setItem('acesso_global_volte', 'liberado') // Salva na memória
+      localStorage.setItem('acesso_global_volte', 'liberado') 
       setAcessoGlobal(true)
     } else {
       setErro('Senha global incorreta.')
     }
   }
 
-  // SE NÃO TEM ACESSO, MOSTRA APENAS A TELA DE BLOQUEIO (Não carrega as rotas)
+  // SE NÃO TEM ACESSO, MOSTRA APENAS A TELA DE BLOQUEIO
   if (!acessoGlobal) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 px-4">
@@ -84,7 +110,6 @@ export default function App() {
   // SE TEM ACESSO, CARREGA O SISTEMA NORMALMENTE
   return (
     <BrowserRouter>
-      {/* O banner de instalação flutuante vai aparecer discretamente se o navegador permitir forçar a instalação */}
       <InstalacaoBanner />
 
       <Routes>
@@ -106,11 +131,10 @@ export default function App() {
           <Route path="/caixa" element={<CaixaHome />} />
         </Route>
         
-        {/* Telas Fullscreen (Fora do layout padrão para otimização de espaço) */}
+        {/* Telas Fullscreen */}
         <Route path="/pdv" element={<Pdv />} />
-        <Route path="/fiado" element={<Fiado />} /> {/* ← 2. Rota do Fiado adicionada aqui! */}
+        <Route path="/fiado" element={<Fiado />} /> 
         
-        {/* Se digitar uma rota que não existe, manda de volta pra Home */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

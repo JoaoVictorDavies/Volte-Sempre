@@ -1,3 +1,4 @@
+import { dispararNotificacao } from '../services/notificacoes'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
@@ -346,6 +347,12 @@ export default function Pdv() {
           const novoStatus = novaQtdLote === 0 ? 'esgotado' : 'ativo'
 
           await supabase.from('estoque_lotes').update({ quantidade_atual: novaQtdLote, status: novoStatus }).eq('id', lote.id)
+          if (novaQtdLote === 0) {
+  dispararNotificacao(
+    "⚠️ Produto Esgotado!", 
+    `O estoque de "${item.nome}" acabou de zerar no PDV. Providencie reposição!`
+  );
+}
           await supabase.from('vendas_itens').insert([{
             venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
             quantidade: qtdDeducao, preco_custo: lote.preco_custo, 
@@ -389,7 +396,10 @@ export default function Pdv() {
       })
 
       alert("✅ Venda finalizada com sucesso!")
-
+dispararNotificacao(
+  "💰 Nova Venda Fechada!", 
+  `Venda de R$ ${total.toFixed(2)} finalizada no caixa via ${nomesMetodos}.`
+);
       setCarrinho([])
       setUltimoProduto(null)
       localStorage.removeItem('volte_pdv_carrinho')
