@@ -433,7 +433,7 @@ export default function CaixaHome() {
                 </button>
                 
                 {/* NOVO BOTÃO DE FICHAS INSERIDO AQUI */}
-                <button onClick={() => navigate('/fichas')} className="bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 text-blue-700 font-bold py-4 rounded-2xl transition-all flex justify-center items-center gap-2 shadow-sm">
+                <button onClick={() => navigate('/fiado')} className="bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 text-blue-700 font-bold py-4 rounded-2xl transition-all flex justify-center items-center gap-2 shadow-sm">
                   <BookOpen size={20}/> Cadastrar Ficha
                 </button>
 
