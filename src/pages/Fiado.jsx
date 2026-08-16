@@ -2,546 +2,626 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { 
-  Search, Plus, User, Edit3, Trash2, ArrowLeft, 
-  DollarSign, FileText, CheckCircle, Clock, ShoppingBag
+  UserPlus, Search, DollarSign, PlusCircle, CreditCard, 
+  ArrowLeft, Phone, Calendar, CheckCircle2, History, X, User, Edit3, Trash2, ShoppingBag
 } from 'lucide-react'
 
-export default function Fichas() {
+export default function Fiado() {
   const navigate = useNavigate()
 
-  // Estados Principais
+  // Estados dos Dados
   const [clientes, setClientes] = useState([])
+  const [clienteSelecionado, setClienteSelecionado] = useState(null)
+  const [extratoContas, setExtratoContas] = useState([])
+  const [extratoPagamentos, setExtratoPagamentos] = useState([])
   const [busca, setBusca] = useState('')
-  const [carregando, setCarregando] = useState(true)
+  const [carregando, setCarregando] = useState(false)
 
-  // Estados de Ficha Aberta (Aba do Cliente)
-  const [clienteAtivo, setClienteAtivo] = useState(null)
-  const [transacoes, setTransacoes] = useState([])
-
-  // Estados de Modais
+  // Modais
   const [modalCliente, setModalCliente] = useState({ aberto: false, modo: 'novo', dados: {} })
-  const [modalVendas, setModalVendas] = useState(false)
+  const [modalNovoDebito, setModalNovoDebito] = useState(false)
   const [modalPagamento, setModalPagamento] = useState(false)
-  const [valorPagamento, setValorPagamento] = useState('')
+  const [modalVincularVenda, setModalVincularVenda] = useState(false)
 
   // Vendas do PDV
-  const [vendasRecentes, setVendasRecentes] = useState([])
+  const [vendasPdv, setVendasPdv] = useState([])
+  const [carregandoVendas, setCarregandoVendas] = useState(false)
 
-  // ==========================================
-  // 1. CARREGAR CLIENTES E SALDOS
-  // ==========================================
-  const carregarClientes = async () => {
-    setCarregando(true)
-    try {
-      const { data: clientesData, error: errCli } = await supabase
-        .from('clientes')
-        .select('*')
-        .order('nome')
-
-      const { data: transacoesData, error: errTrans } = await supabase
-        .from('fiado_transacoes')
-        .select('*')
-
-      if (errCli || errTrans) throw new Error("Erro ao carregar dados")
-
-      // Calcula o saldo de cada cliente
-      const clientesComSaldo = clientesData.map(cliente => {
-        const transDoCliente = transacoesData.filter(t => t.cliente_id === cliente.id)
-        const totalDebitos = transDoCliente.filter(t => t.tipo === 'debito').reduce((acc, curr) => acc + Number(curr.valor), 0)
-        const totalPagos = transDoCliente.filter(t => t.tipo === 'pagamento').reduce((acc, curr) => acc + Number(curr.valor), 0)
-        return {
-          ...cliente,
-          saldoDevedor: totalDebitos - totalPagos
-        }
-      })
-
-      setClientes(clientesComSaldo)
-    } catch (error) {
-      console.error(error)
-      alert("Erro ao carregar clientes.")
-    } finally {
-      setCarregando(false)
-    }
-  }
+  // Formulários
+  const [novoDebito, setNovoDebito] = useState({ valor_total: '', descricao: '', valor_pago_inicial: '' })
+  const [novoPagamento, setNovoPagamento] = useState({ valor: '', metodo_pagamento: 'pix', observacao: '' })
 
   useEffect(() => {
     carregarClientes()
   }, [])
 
+  useEffect(() => {
+    if (clienteSelecionado) {
+      carregarFichaCliente(clienteSelecionado.id)
+    }
+  }, [clienteSelecionado])
+
   // ==========================================
-  // 2. CRUD DE CLIENTES
+  // 1. CARREGAR CLIENTES E SOMA DOS SALDOS
+  // ==========================================
+  const carregarClientes = async () => {
+    setCarregando(true)
+    try {
+      const { data: listaClientes, error: errC } = await supabase.from('clientes').select('*').order('nome')
+      if (errC) throw errC
+
+      const { data: contas, error: errConta } = await supabase.from('fiado_contas').select('*').neq('status', 'pago')
+      if (errConta) throw errConta
+
+      const clientesComSaldo = (listaClientes || []).map(cli => {
+        const contasDoCli = (contas || []).filter(c => c.cliente_id === cli.id)
+        const saldoDevido = contasDoCli.reduce((acc, c) => acc + (Number(c.valor_total) - Number(c.valor_pago)), 0)
+        return { ...cli, saldoDevido }
+      })
+
+      setClientes(clientesComSaldo)
+
+      if (clienteSelecionado) {
+        const atualizado = clientesComSaldo.find(c => c.id === clienteSelecionado.id)
+        if (atualizado) setClienteSelecionado(atualizado)
+      }
+    } catch (err) {
+      console.error("Erro ao carregar clientes:", err)
+    } finally {
+      setCarregando(false)
+    }
+  }
+
+  // ==========================================
+  // 2. CARREGAR EXTRATO DA FICHA
+  // ==========================================
+  const carregarFichaCliente = async (clienteId) => {
+    try {
+      const [resContas, resPagamentos] = await Promise.all([
+        supabase.from('fiado_contas').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false }),
+        supabase.from('fiado_pagamentos').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false })
+      ])
+
+      setExtratoContas(resContas.data || [])
+      setExtratoPagamentos(resPagamentos.data || [])
+    } catch (err) {
+      console.error("Erro ao carregar ficha do cliente:", err)
+    }
+  }
+
+  // ==========================================
+  // 3. CRUD: SALVAR (NOVO/EDITAR) E EXCLUIR CLIENTE
   // ==========================================
   const salvarCliente = async () => {
-    if (!modalCliente.dados.nome) return alert("O nome é obrigatório")
+    if (!modalCliente.dados.nome) return alert("Por favor, digite o nome do cliente.")
 
     try {
       const payload = {
         nome: modalCliente.dados.nome,
         telefone: modalCliente.dados.telefone || '',
-        limite_credito: parseFloat(modalCliente.dados.limite_credito) || 0
+        limite_credito: parseFloat(modalCliente.dados.limite_credito) || 0,
+        observacoes: modalCliente.dados.observacoes || ''
       }
 
+      let dataCli;
       if (modalCliente.modo === 'novo') {
-        await supabase.from('clientes').insert([payload])
+        const { data, error } = await supabase.from('clientes').insert([payload]).select().single()
+        if (error) throw error
+        dataCli = data
+        alert("Cliente cadastrado com sucesso!")
       } else {
-        await supabase.from('clientes').update(payload).eq('id', modalCliente.dados.id)
+        const { data, error } = await supabase.from('clientes').update(payload).eq('id', modalCliente.dados.id).select().single()
+        if (error) throw error
+        dataCli = data
+        alert("Ficha atualizada com sucesso!")
       }
-      
+
       setModalCliente({ aberto: false, modo: 'novo', dados: {} })
-      carregarClientes()
-      
-      // Se estava com a ficha do cliente aberta, atualiza os dados visuais dele
-      if (clienteAtivo && modalCliente.modo === 'editar') {
-        setClienteAtivo({ ...clienteAtivo, ...payload })
-      }
-    } catch (error) {
-      alert("Erro ao salvar cliente.")
+      await carregarClientes()
+      setClienteSelecionado(dataCli)
+    } catch (err) {
+      alert("Erro ao salvar cliente: " + err.message)
     }
   }
 
   const excluirCliente = async (cliente) => {
-    if (cliente.saldoDevedor > 0) {
-      alert(`Não é possível excluir! O cliente possui uma dívida pendente de R$ ${cliente.saldoDevedor.toFixed(2)}`)
+    if (cliente.saldoDevido > 0) {
+      alert(`Não é possível excluir! O cliente possui uma dívida pendente de R$ ${cliente.saldoDevido.toFixed(2)}`)
       return
     }
 
-    if (!confirm(`Tem certeza que deseja excluir a ficha de ${cliente.nome}?`)) return
+    if (!window.confirm(`Tem certeza que deseja excluir a ficha de ${cliente.nome}?`)) return
 
     try {
       await supabase.from('clientes').delete().eq('id', cliente.id)
+      alert("Ficha excluída com sucesso!")
+      setClienteSelecionado(null)
       carregarClientes()
-    } catch (error) {
+    } catch (err) {
       alert("Erro ao excluir cliente.")
     }
   }
 
   // ==========================================
-  // 3. ABRIR FICHA DO CLIENTE
+  // 4. VINCULAR VENDA DO PDV (IDEMPOTÊNCIA)
   // ==========================================
-  const abrirFicha = async (cliente) => {
-    setClienteAtivo(cliente)
+  const abrirModalVincular = async () => {
+    setCarregandoVendas(true)
+    setModalVincularVenda(true)
     try {
-      const { data } = await supabase
-        .from('fiado_transacoes')
-        .select('*, vendas(id)')
-        .eq('cliente_id', cliente.id)
-        .order('criado_em', { ascending: false })
-      
-      setTransacoes(data || [])
-    } catch (error) {
-      console.error(error)
-    }
-  }
-
-  // ==========================================
-  // 4. VINCULAR VENDA DO PDV AO FIADO
-  // ==========================================
-  const abrirModalVendas = async () => {
-    setCarregando(true)
-    setModalVendas(true)
-    try {
-      // Puxa as últimas 50 vendas e seus itens
+      // 1. Busca as últimas 50 vendas finalizadas
       const { data: vendas, error: errVendas } = await supabase
         .from('vendas')
         .select('id, total, criado_em, vendas_itens(nome, quantidade)')
         .order('criado_em', { ascending: false })
         .limit(50)
 
-      // Puxa transações já vinculadas para evitar duplicidade (Idempotência)
-      const { data: transacoesFiado } = await supabase
-        .from('fiado_transacoes')
-        .select('venda_id')
-        .not('venda_id', 'is', null)
+      if (errVendas) throw errVendas
 
-      const vendasJaVinculadas = transacoesFiado.map(t => t.venda_id)
+      // 2. Busca quais vendas já foram vinculadas ao fiado (qualquer cliente)
+      const { data: jaVinculadas } = await supabase.from('fiado_contas').select('venda_id').not('venda_id', 'is', null)
+      const idsVinculados = jaVinculadas.map(v => v.venda_id)
 
-      // Filtra deixando apenas vendas que NÃO estão no fiado
-      const vendasDisponiveis = vendas.filter(v => !vendasJaVinculadas.includes(v.id))
-      setVendasRecentes(vendasDisponiveis)
-    } catch (error) {
-      alert("Erro ao carregar vendas recentes.")
+      // 3. Filtra mostrando apenas vendas limpas (Idempotência)
+      const disponiveis = vendas.filter(v => !idsVinculados.includes(v.id))
+      setVendasPdv(disponiveis)
+    } catch (err) {
+      alert("Erro ao buscar vendas do PDV.")
     } finally {
-      setCarregando(false)
+      setCarregandoVendas(false)
     }
   }
 
   const confirmarVinculoVenda = async (venda) => {
-    if (!confirm(`Deseja lançar a venda de R$ ${venda.total.toFixed(2)} na ficha de ${clienteAtivo.nome}?`)) return
+    if (!window.confirm(`Lançar esta compra de R$ ${venda.total.toFixed(2)} para ${clienteSelecionado.nome}?`)) return
+
+    const itensDesc = venda.vendas_itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ')
 
     try {
-      // Cria a descrição formatando os itens comprados
-      const descItens = venda.vendas_itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ')
-
-      await supabase.from('fiado_transacoes').insert([{
-        cliente_id: clienteAtivo.id,
+      await supabase.from('fiado_contas').insert([{
+        cliente_id: clienteSelecionado.id,
         venda_id: venda.id,
-        tipo: 'debito',
-        valor: venda.total,
-        descricao: `Venda Vinculada: ${descItens}`
+        valor_total: venda.total,
+        valor_pago: 0,
+        status: 'pendente',
+        descricao: `Venda via PDV: ${itensDesc}`
       }])
 
-      alert("Débito lançado com sucesso!")
-      setModalVendas(false)
+      alert("Compra vinculada com sucesso!")
+      setModalVincularVenda(false)
       carregarClientes()
-      abrirFicha(clienteAtivo) // Recarrega a ficha
-
-    } catch (error) {
+      carregarFichaCliente(clienteSelecionado.id)
+    } catch (err) {
       alert("Erro ao vincular venda.")
     }
   }
 
   // ==========================================
-  // 5. REGISTRAR PAGAMENTO
+  // 5. LANÇAR DÉBITO MANUAL
   // ==========================================
-  const registrarPagamento = async () => {
-    const valor = parseFloat(valorPagamento.replace(',', '.'))
-    if (!valor || valor <= 0) return alert("Insira um valor válido.")
+  const salvarDebitoManual = async () => {
+    const valor = parseFloat(novoDebito.valor_total)
+    if (!valor || valor <= 0) return alert("Informe um valor válido.")
+
+    const entrada = parseFloat(novoDebito.valor_pago_inicial) || 0
+    const statusInicial = entrada >= valor ? 'pago' : entrada > 0 ? 'parcial' : 'pendente'
 
     try {
-      await supabase.from('fiado_transacoes').insert([{
-        cliente_id: clienteAtivo.id,
-        tipo: 'pagamento',
-        valor: valor,
-        descricao: 'Pagamento Parcial/Total de Dívida'
-      }])
+      const { data: contaCriada } = await supabase.from('fiado_contas').insert([{
+        cliente_id: clienteSelecionado.id,
+        valor_total: valor,
+        valor_pago: entrada,
+        status: statusInicial,
+        descricao: novoDebito.descricao || 'Compra manual sem descrição'
+      }]).select().single()
 
-      alert("Pagamento registrado com sucesso!")
-      setValorPagamento('')
-      setModalPagamento(false)
-      
-      // Atualiza os dados na tela
+      if (entrada > 0) {
+        await supabase.from('fiado_pagamentos').insert([{
+          cliente_id: clienteSelecionado.id,
+          fiado_conta_id: contaCriada.id,
+          valor: entrada,
+          metodo_pagamento: 'dinheiro',
+          observacao: 'Entrada na hora da compra'
+        }])
+      }
+
+      alert("Débito manual lançado!")
+      setModalNovoDebito(false)
+      setNovoDebito({ valor_total: '', descricao: '', valor_pago_inicial: '' })
       carregarClientes()
-      abrirFicha(clienteAtivo)
-    } catch (error) {
-      alert("Erro ao registrar pagamento.")
+      carregarFichaCliente(clienteSelecionado.id)
+    } catch (err) {
+      alert("Erro ao lançar débito.")
     }
   }
 
   // ==========================================
-  // RENDERIZAÇÕES CONDICIONAIS
+  // 6. REGISTRAR PAGAMENTO / ABATIMENTO
   // ==========================================
+  const salvarPagamento = async () => {
+    let valorAbater = parseFloat(novoPagamento.valor)
+    if (!valorAbater || valorAbater <= 0) return alert("Informe um valor válido.")
 
-  // TELA DE FICHA ABERTA (Detalhes do Cliente)
-  if (clienteAtivo) {
-    const saldoAtual = transacoes.filter(t => t.tipo === 'debito').reduce((a, b) => a + Number(b.valor), 0) - 
-                       transacoes.filter(t => t.tipo === 'pagamento').reduce((a, b) => a + Number(b.valor), 0)
+    try {
+      await supabase.from('fiado_pagamentos').insert([{
+        cliente_id: clienteSelecionado.id,
+        valor: valorAbater,
+        metodo_pagamento: novoPagamento.metodo_pagamento,
+        observacao: novoPagamento.observacao || 'Abatimento de dívida'
+      }])
 
-    const limiteDisponivel = clienteAtivo.limite_credito - saldoAtual
+      // Abate em cascata
+      const contasPendentes = extratoContas
+        .filter(c => c.status !== 'pago')
+        .sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em))
 
-    return (
-      <div className="min-h-screen bg-[#F5F5F7] animate-in slide-in-from-right">
-        {/* Cabeçalho da Ficha */}
-        <header className="bg-white p-4 flex items-center justify-between shadow-sm sticky top-0 z-10">
-          <button onClick={() => setClienteAtivo(null)} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 font-bold bg-gray-100 px-4 py-2 rounded-xl transition-colors">
-            <ArrowLeft size={20} /> Voltar
-          </button>
-          <h1 className="text-xl font-black text-gray-800 flex items-center gap-2">
-            <User size={24} className="text-blue-500" /> Ficha de {clienteAtivo.nome}
-          </h1>
-          <div className="w-24"></div> {/* Espaçador */}
-        </header>
+      for (const conta of contasPendentes) {
+        if (valorAbater <= 0) break
 
-        <div className="max-w-4xl mx-auto p-4 md:p-8">
-          {/* Painel Financeiro */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-              <p className="text-gray-500 font-bold text-sm mb-1 uppercase tracking-wider">Saldo Devedor Atual</p>
-              <h2 className={`text-4xl font-black ${saldoAtual > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                R$ {saldoAtual.toFixed(2)}
-              </h2>
-            </div>
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col justify-center">
-              <div className="flex justify-between mb-2">
-                <span className="text-gray-500 font-bold">Limite de Crédito:</span>
-                <span className="font-bold text-gray-800">R$ {clienteAtivo.limite_credito.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between border-t border-dashed pt-2">
-                <span className="text-gray-500 font-bold">Limite Disponível:</span>
-                <span className={`font-bold ${limiteDisponivel < 0 ? 'text-red-500' : 'text-blue-600'}`}>
-                  R$ {limiteDisponivel.toFixed(2)}
-                </span>
-              </div>
-            </div>
-          </div>
+        const saldoConta = Number(conta.valor_total) - Number(conta.valor_pago)
+        const abatimento = Math.min(valorAbater, saldoConta)
+        const novoValorPago = Number(conta.valor_pago) + abatimento
+        const novoStatus = novoValorPago >= Number(conta.valor_total) ? 'pago' : 'parcial'
 
-          {/* Botões de Ação */}
-          <div className="flex gap-4 mb-8">
-            <button 
-              onClick={abrirModalVendas}
-              className="flex-1 bg-red-50 border-2 border-red-100 hover:bg-red-100 text-red-600 font-bold py-5 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95"
-            >
-              <ShoppingBag size={24} /> Lançar Venda (Débito)
-            </button>
-            <button 
-              onClick={() => setModalPagamento(true)}
-              className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-5 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-500/30 active:scale-95"
-            >
-              <DollarSign size={24} /> Receber Pagamento
-            </button>
-          </div>
+        await supabase.from('fiado_contas')
+          .update({ valor_pago: novoValorPago, status: novoStatus })
+          .eq('id', conta.id)
 
-          {/* Histórico */}
-          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
-            <h3 className="font-bold text-gray-800 text-lg mb-6 flex items-center gap-2">
-              <Clock size={20} className="text-gray-400" /> Histórico de Movimentações
-            </h3>
+        valorAbater -= abatimento
+      }
 
-            {transacoes.length === 0 ? (
-              <p className="text-center text-gray-400 py-10">Nenhuma movimentação registrada.</p>
-            ) : (
-              <div className="space-y-4">
-                {transacoes.map(t => (
-                  <div key={t.id} className="flex flex-col md:flex-row justify-between md:items-center p-4 rounded-2xl border border-gray-100 bg-gray-50">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${t.tipo === 'debito' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                          {t.tipo === 'debito' ? 'Compra' : 'Pagamento'}
-                        </span>
-                        <span className="text-gray-400 text-xs font-medium">
-                          {new Date(t.criado_em).toLocaleDateString('pt-BR')} às {new Date(t.criado_em).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
-                        </span>
-                      </div>
-                      <p className="text-gray-700 font-medium text-sm md:text-base pr-4">{t.descricao}</p>
-                    </div>
-                    <div className={`text-xl font-black shrink-0 mt-2 md:mt-0 ${t.tipo === 'debito' ? 'text-red-500' : 'text-green-600'}`}>
-                      {t.tipo === 'debito' ? '-' : '+'} R$ {Number(t.valor).toFixed(2)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ==================================================== */}
-        {/* MODAL: SELECIONAR VENDA DO PDV PARA LANÇAR NO FIADO  */}
-        {/* ==================================================== */}
-        {modalVendas && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
-            <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
-              <header className="p-6 border-b flex justify-between items-center">
-                <div>
-                  <h3 className="font-bold text-xl text-gray-800">Vincular Venda do PDV</h3>
-                  <p className="text-gray-500 text-sm">Selecione uma venda recente para registrar como dívida.</p>
-                </div>
-                <button onClick={() => setModalVendas(false)} className="bg-gray-100 p-2 rounded-xl text-gray-500 hover:bg-gray-200"><X size={24} /></button>
-              </header>
-              
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
-                {carregando ? (
-                  <p className="text-center text-gray-400 py-10 font-bold animate-pulse">Buscando vendas recentes...</p>
-                ) : vendasRecentes.length === 0 ? (
-                  <div className="text-center py-10">
-                    <ShoppingBag size={48} className="text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 font-medium">Nenhuma venda recente disponível.<br/>Todas as vendas já foram vinculadas a clientes ou o caixa está vazio.</p>
-                  </div>
-                ) : (
-                  vendasRecentes.map(v => (
-                    <div key={v.id} className="bg-white border border-gray-200 p-4 rounded-2xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-blue-300 transition-colors">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded">
-                            {new Date(v.criado_em).toLocaleTimeString('pt-BR')}
-                          </span>
-                          <span className="text-sm font-bold text-gray-600 truncate flex-1">
-                            {v.vendas_itens?.map(i => `${i.quantidade}x ${i.nome}`).join(', ')}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-400">Data: {new Date(v.criado_em).toLocaleDateString('pt-BR')}</p>
-                      </div>
-                      <div className="flex items-center gap-4 w-full md:w-auto">
-                        <span className="text-xl font-black text-gray-800">R$ {v.total.toFixed(2)}</span>
-                        <button 
-                          onClick={() => confirmarVinculoVenda(v)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl transition-colors shrink-0 ml-auto"
-                        >
-                          Vincular
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ==================================================== */}
-        {/* MODAL: REGISTRAR PAGAMENTO (ABATER DÍVIDA)           */}
-        {/* ==================================================== */}
-        {modalPagamento && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
-            <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl">
-              <header className="p-6 border-b text-center">
-                <h3 className="font-bold text-xl text-gray-800">Receber Pagamento</h3>
-                <p className="text-gray-500 text-sm mt-1">Dívida Atual: <span className="font-bold text-red-500">R$ {saldoAtual.toFixed(2)}</span></p>
-              </header>
-              <div className="p-6">
-                <div className="relative mb-6">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-xl">R$</span>
-                  <input 
-                    type="number" 
-                    placeholder="0.00"
-                    value={valorPagamento}
-                    onChange={(e) => setValorPagamento(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 rounded-2xl bg-gray-50 border border-gray-200 text-2xl font-black text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500"
-                    autoFocus
-                  />
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={() => setModalPagamento(false)} className="flex-1 py-4 bg-gray-100 font-bold text-gray-600 rounded-xl hover:bg-gray-200">Cancelar</button>
-                  <button onClick={registrarPagamento} className="flex-1 py-4 bg-green-500 hover:bg-green-600 font-bold text-white rounded-xl shadow-lg shadow-green-500/30">Confirmar</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-      </div>
-    )
+      alert("Pagamento registrado com sucesso!")
+      setModalPagamento(false)
+      setNovoPagamento({ valor: '', metodo_pagamento: 'pix', observacao: '' })
+      carregarClientes()
+      carregarFichaCliente(clienteSelecionado.id)
+    } catch (err) {
+      alert("Erro ao registrar pagamento.")
+    }
   }
 
-  // TELA INICIAL: LISTA DE CLIENTES E SALDOS
+  const clientesFiltrados = clientes.filter(c => 
+    c.nome.toLowerCase().includes(busca.toLowerCase()) || 
+    (c.telefone && c.telefone.includes(busca))
+  )
+
   return (
-    <div className="min-h-screen bg-[#F5F5F7] p-4 md:p-8">
-      <div className="max-w-5xl mx-auto">
-        <header className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-8">
-          <div>
-            <button onClick={() => navigate('/caixa')} className="flex items-center gap-2 text-gray-500 hover:text-gray-800 font-bold mb-2 transition-colors">
-              <ArrowLeft size={18} /> Voltar ao Caixa
+    <div className="flex flex-col md:flex-row h-screen bg-[#F5F5F7] font-sans">
+      
+      {/* =========================================
+          LADO ESQUERDO: LISTA DE CLIENTES
+          ========================================= */}
+      <div className="w-full md:w-[400px] bg-white border-r border-gray-200 flex flex-col h-[50vh] md:h-full z-10 shadow-sm">
+        <header className="p-4 border-b border-gray-200 flex justify-between items-center bg-white sticky top-0">
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/caixa')} className="p-2 text-gray-400 hover:text-gray-800 rounded-xl hover:bg-gray-100 transition-colors">
+              <ArrowLeft size={20} />
             </button>
-            <h1 className="text-3xl font-black text-[#1D1D1F] tracking-tight">Controle de Fiados</h1>
+            <h1 className="font-black text-gray-800 text-lg tracking-tight">Fiados</h1>
           </div>
           <button 
             onClick={() => setModalCliente({ aberto: true, modo: 'novo', dados: {} })}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transition-all active:scale-95"
+            className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-transform active:scale-95 shadow-md flex items-center justify-center"
           >
-            <Plus size={20} /> Novo Cliente
+            <UserPlus size={20} />
           </button>
         </header>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6">
+        <div className="p-4 border-b border-gray-100 bg-gray-50">
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input 
               type="text" 
-              placeholder="Buscar cliente pelo nome..." 
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="w-full bg-gray-50 border-none rounded-xl py-4 pl-12 pr-4 text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-blue-100"
+              placeholder="Buscar cliente..." 
+              value={busca} 
+              onChange={e => setBusca(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 shadow-inner"
             />
           </div>
         </div>
 
-        {carregando ? (
-          <p className="text-center text-gray-400 font-bold py-10 animate-pulse">Carregando carteira de clientes...</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {clientes.filter(c => c.nome.toLowerCase().includes(busca.toLowerCase())).map(cliente => (
-              <div key={cliente.id} className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 hover:border-blue-200 transition-all flex flex-col">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 shrink-0">
-                    <User size={24} />
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setModalCliente({ aberto: true, modo: 'editar', dados: cliente })} className="p-2 text-gray-400 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 rounded-lg transition-colors" title="Editar Limite/Dados">
-                      <Edit3 size={18} />
-                    </button>
-                    <button onClick={() => excluirCliente(cliente)} className="p-2 text-gray-400 hover:text-red-600 bg-gray-50 hover:bg-red-50 rounded-lg transition-colors" title="Excluir Ficha">
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </div>
-                
-                <h3 className="text-xl font-bold text-gray-800 mb-1 line-clamp-1">{cliente.nome}</h3>
-                <p className="text-gray-500 text-sm mb-6">{cliente.telefone || 'Sem telefone'}</p>
-
-                <div className="mt-auto pt-4 border-t border-dashed border-gray-200 flex justify-between items-end mb-4">
-                  <div>
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Dívida</p>
-                    <p className={`text-xl font-black ${cliente.saldoDevedor > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                      R$ {cliente.saldoDevedor.toFixed(2)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Limite</p>
-                    <p className="font-bold text-gray-700">R$ {cliente.limite_credito.toFixed(2)}</p>
-                  </div>
-                </div>
-
-                <button 
-                  onClick={() => abrirFicha(cliente)}
-                  className="w-full bg-[#1D1D1F] hover:bg-black text-white font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2 mt-2"
-                >
-                  <FileText size={18} /> Abrir Ficha
-                </button>
+        <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
+          {clientesFiltrados.map(cli => (
+            <button
+              key={cli.id}
+              onClick={() => setClienteSelecionado(cli)}
+              className={`w-full text-left p-4 hover:bg-blue-50 transition-colors flex justify-between items-center group ${clienteSelecionado?.id === cli.id ? 'bg-blue-50 border-l-4 border-blue-600' : 'border-l-4 border-transparent'}`}
+            >
+              <div>
+                <h3 className="font-bold text-gray-800">{cli.nome}</h3>
+                <p className="text-xs text-gray-400 mt-1">{cli.telefone || 'Sem telefone'}</p>
               </div>
-            ))}
-
-            {clientes.length === 0 && !carregando && (
-              <div className="col-span-full text-center py-20 text-gray-400 border-2 border-dashed border-gray-200 rounded-3xl bg-white">
-                <User size={48} className="mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-bold text-gray-500">Nenhum cliente cadastrado no fiado.</p>
-                <p className="text-sm">Clique em "Novo Cliente" para começar a gerenciar.</p>
+              <div className="text-right">
+                <span className={`text-sm font-black block ${cli.saldoDevido > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  R$ {cli.saldoDevido.toFixed(2)}
+                </span>
+                <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">
+                  {cli.saldoDevido > 0 ? 'Pendente' : 'Em dia'}
+                </span>
               </div>
-            )}
-          </div>
-        )}
-
+            </button>
+          ))}
+          {clientesFiltrados.length === 0 && !carregando && (
+            <div className="p-8 text-center text-gray-400 text-sm font-medium">Nenhum cliente encontrado.</div>
+          )}
+        </div>
       </div>
 
-      {/* ==================================================== */}
-      {/* MODAL: CRIAR / EDITAR CLIENTE DO FIADO               */}
-      {/* ==================================================== */}
+      {/* =========================================
+          LADO DIREITO: FICHA DO DEVEDOR
+          ========================================= */}
+      <div className="flex-1 flex flex-col h-[50vh] md:h-full overflow-y-auto bg-[#F5F5F7] relative">
+        {clienteSelecionado ? (
+          <div className="p-4 md:p-8 max-w-5xl mx-auto w-full space-y-6 animate-in slide-in-from-right-4">
+            
+            {/* CABEÇALHO */}
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+              <div className="flex items-center gap-5">
+                <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner shrink-0">
+                  <User size={32} />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-black text-gray-800">{clienteSelecionado.nome}</h2>
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => setModalCliente({ aberto: true, modo: 'editar', dados: clienteSelecionado })} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors">
+                      <Edit3 size={14} /> Editar
+                    </button>
+                    <button onClick={() => excluirCliente(clienteSelecionado)} className="text-xs bg-red-50 hover:bg-red-100 text-red-600 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors">
+                      <Trash2 size={14} /> Excluir
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-red-50 border border-red-100 p-5 rounded-2xl w-full md:w-auto text-right shadow-inner">
+                <span className="text-xs font-bold text-red-400 uppercase tracking-widest block mb-1">Dívida Total</span>
+                <span className="text-4xl font-black text-red-600">R$ {clienteSelecionado.saldoDevido.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* BOTÕES DE AÇÃO */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <button
+                onClick={abrirModalVincular}
+                className="py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-2xl shadow-lg shadow-blue-500/30 transition-transform active:scale-95 flex flex-col items-center justify-center gap-1"
+              >
+                <ShoppingBag size={24} /> <span>Puxar do PDV</span>
+              </button>
+
+              <button
+                onClick={() => setModalNovoDebito(true)}
+                className="py-4 bg-white border-2 border-red-100 hover:bg-red-50 text-red-600 font-bold rounded-2xl shadow-sm transition-transform active:scale-95 flex flex-col items-center justify-center gap-1"
+              >
+                <PlusCircle size={24} /> <span>Lançamento Manual</span>
+              </button>
+
+              <button
+                disabled={clienteSelecionado.saldoDevido <= 0}
+                onClick={() => setModalPagamento(true)}
+                className={`py-4 font-bold text-white rounded-2xl shadow-lg transition-transform active:scale-95 flex flex-col items-center justify-center gap-1 ${clienteSelecionado.saldoDevido <= 0 ? 'bg-gray-300 cursor-not-allowed shadow-none' : 'bg-green-500 hover:bg-green-600 shadow-green-500/30'}`}
+              >
+                <DollarSign size={24} /> <span>Abater Dívida</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              {/* TABELA DE COMPRAS */}
+              <div className="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden">
+                <header className="p-5 bg-gray-50 border-b border-gray-200 font-bold text-gray-700 flex items-center gap-2">
+                  <History size={18} className="text-blue-500" /> Extrato de Compras
+                </header>
+                <div className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
+                  {extratoContas.map(c => {
+                    const saldoFalta = Number(c.valor_total) - Number(c.valor_pago)
+                    return (
+                      <div key={c.id} className="p-5 hover:bg-gray-50 transition-colors">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className={`text-[10px] font-black px-2 py-1 rounded-md uppercase tracking-wider ${c.status === 'pago' ? 'bg-green-100 text-green-700' : c.status === 'parcial' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700'}`}>
+                            {c.status}
+                          </span>
+                          <span className="text-xs font-bold text-gray-400">
+                            {new Date(c.criado_em).toLocaleDateString('pt-BR')}
+                          </span>
+                        </div>
+                        <p className="font-bold text-gray-800 text-sm mb-3">{c.descricao}</p>
+                        <div className="flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-100">
+                          <div className="text-xs font-bold text-gray-500">Total: R$ {Number(c.valor_total).toFixed(2)}</div>
+                          {saldoFalta > 0 ? (
+                            <div className="text-sm font-black text-red-600">Falta: R$ {saldoFalta.toFixed(2)}</div>
+                          ) : (
+                            <div className="text-sm font-black text-green-600 flex items-center gap-1">
+                              <CheckCircle2 size={16} /> Quitado
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {extratoContas.length === 0 && (
+                    <div className="p-10 text-center text-gray-400 text-sm font-medium">Nenhum débito registrado.</div>
+                  )}
+                </div>
+              </div>
+
+              {/* HISTÓRICO DE PAGAMENTOS */}
+              <div className="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden">
+                <header className="p-5 bg-gray-50 border-b border-gray-200 font-bold text-gray-700 flex items-center gap-2">
+                  <CreditCard size={18} className="text-green-500" /> Pagamentos Realizados
+                </header>
+                <div className="divide-y divide-gray-100 max-h-[500px] overflow-y-auto">
+                  {extratoPagamentos.map(p => (
+                    <div key={p.id} className="p-5 flex justify-between items-center hover:bg-gray-50 transition-colors">
+                      <div>
+                        <div className="font-bold text-gray-800 text-sm capitalize mb-1">Via {p.metodo_pagamento}</div>
+                        <div className="text-xs text-gray-400 flex items-center gap-1">
+                          <Calendar size={12} /> {new Date(p.criado_em).toLocaleDateString('pt-BR')}
+                        </div>
+                        {p.observacao && <p className="text-xs text-gray-500 mt-2 bg-white px-2 py-1 rounded border border-gray-100">{p.observacao}</p>}
+                      </div>
+                      <div className="font-black text-green-600 text-xl bg-green-50 px-3 py-1 rounded-xl">
+                        + R$ {Number(p.valor).toFixed(2)}
+                      </div>
+                    </div>
+                  ))}
+                  {extratoPagamentos.length === 0 && (
+                    <div className="p-10 text-center text-gray-400 text-sm font-medium">Nenhum pagamento registrado.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+          </div>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8 text-center animate-in fade-in">
+            <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-sm border border-gray-200 mb-6">
+              <User size={40} className="text-gray-300" />
+            </div>
+            <h3 className="text-2xl font-black text-gray-600 mb-2">Selecione um Cliente</h3>
+            <p className="text-gray-500 max-w-sm">Escolha uma ficha na lista ao lado para ver extratos, vincular compras do caixa ou abater dívidas.</p>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================= */}
+      {/* MODAL: CRIAR / EDITAR CLIENTE                             */}
+      {/* ========================================================= */}
       {modalCliente.aberto && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
-          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden">
-            <header className="p-6 border-b text-center bg-gray-50">
-              <h3 className="font-bold text-xl text-gray-800">
-                {modalCliente.modo === 'novo' ? 'Novo Cliente' : 'Editar Cliente'}
-              </h3>
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+            <header className="bg-gray-50 border-b p-5 flex justify-between items-center">
+              <h3 className="font-black text-xl text-gray-800">{modalCliente.modo === 'novo' ? 'Novo Cliente' : 'Editar Ficha'}</h3>
+              <button onClick={() => setModalCliente({ aberto: false, dados: {} })} className="text-gray-400 hover:text-gray-800 bg-gray-100 p-2 rounded-xl"><X size={20} /></button>
             </header>
             <div className="p-6 space-y-4">
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase ml-1 mb-1 block">Nome Completo</label>
-                <input 
-                  type="text" 
-                  value={modalCliente.dados.nome || ''} 
-                  onChange={e => setModalCliente(prev => ({...prev, dados: {...prev.dados, nome: e.target.value}}))}
-                  className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Ex: João da Silva"
-                />
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Nome Completo</label>
+                <input type="text" value={modalCliente.dados.nome || ''} onChange={e => setModalCliente(p => ({...p, dados: {...p.dados, nome: e.target.value}}))} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-bold text-gray-800 outline-none focus:bg-white focus:border-blue-500" placeholder="Nome do cliente..." />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Telefone</label>
+                  <input type="text" value={modalCliente.dados.telefone || ''} onChange={e => setModalCliente(p => ({...p, dados: {...p.dados, telefone: e.target.value}}))} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-medium outline-none focus:bg-white focus:border-blue-500" placeholder="(00) 00000-0000" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Limite (R$)</label>
+                  <input type="number" value={modalCliente.dados.limite_credito || ''} onChange={e => setModalCliente(p => ({...p, dados: {...p.dados, limite_credito: e.target.value}}))} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-black text-blue-600 outline-none focus:bg-white focus:border-blue-500" placeholder="0.00" />
+                </div>
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase ml-1 mb-1 block">Telefone (Opcional)</label>
-                <input 
-                  type="tel" 
-                  value={modalCliente.dados.telefone || ''} 
-                  onChange={e => setModalCliente(prev => ({...prev, dados: {...prev.dados, telefone: e.target.value}}))}
-                  className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="(00) 00000-0000"
-                />
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Observações</label>
+                <textarea value={modalCliente.dados.observacoes || ''} onChange={e => setModalCliente(p => ({...p, dados: {...p.dados, observacoes: e.target.value}}))} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-medium outline-none focus:bg-white focus:border-blue-500" rows={2} />
               </div>
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase ml-1 mb-1 block">Limite de Crédito (R$)</label>
-                <input 
-                  type="number" 
-                  value={modalCliente.dados.limite_credito || ''} 
-                  onChange={e => setModalCliente(prev => ({...prev, dados: {...prev.dados, limite_credito: e.target.value}}))}
-                  className="w-full p-4 bg-gray-50 border border-gray-200 rounded-xl font-bold text-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button onClick={() => setModalCliente({ aberto: false, dados: {} })} className="flex-1 py-4 bg-gray-100 hover:bg-gray-200 font-bold text-gray-600 rounded-xl">Cancelar</button>
-                <button onClick={salvarCliente} className="flex-1 py-4 bg-blue-600 hover:bg-blue-700 font-bold text-white rounded-xl shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2">
-                  <CheckCircle size={20} /> Salvar
-                </button>
-              </div>
+              <button onClick={salvarCliente} className="w-full mt-4 py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 active:scale-95 transition-transform shadow-lg shadow-blue-500/30">Salvar Cadastro</button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ========================================================= */}
+      {/* MODAL: VINCULAR VENDA DO PDV                              */}
+      {/* ========================================================= */}
+      {modalVincularVenda && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <header className="bg-blue-600 p-6 text-white flex justify-between items-center">
+              <div>
+                <h3 className="font-black text-xl">Vincular Venda do Caixa</h3>
+                <p className="text-blue-200 text-sm mt-1">Selecione a venda para lançar na ficha de {clienteSelecionado?.nome}</p>
+              </div>
+              <button onClick={() => setModalVincularVenda(false)} className="text-blue-200 hover:text-white bg-blue-700/50 p-2 rounded-xl"><X size={24} /></button>
+            </header>
+            
+            <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-3">
+              {carregandoVendas ? (
+                <p className="text-center py-10 font-bold text-gray-400 animate-pulse">Buscando vendas no caixa...</p>
+              ) : vendasPdv.length === 0 ? (
+                <div className="text-center py-10 text-gray-500">
+                  <ShoppingBag size={48} className="mx-auto text-gray-300 mb-4" />
+                  <p className="font-bold text-lg">Nenhuma venda disponível.</p>
+                  <p className="text-sm">Todas as vendas recentes já foram vinculadas ou o caixa está vazio.</p>
+                </div>
+              ) : (
+                vendasPdv.map(v => (
+                  <div key={v.id} className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row justify-between md:items-center gap-4 hover:border-blue-300 transition-colors">
+                    <div className="flex-1">
+                      <div className="text-xs font-bold text-white bg-gray-400 px-2 py-1 rounded inline-block mb-2">
+                        {new Date(v.criado_em).toLocaleTimeString('pt-BR')}
+                      </div>
+                      <p className="text-sm font-bold text-gray-700 line-clamp-2">
+                        {v.vendas_itens?.map(i => `${i.quantidade}x ${i.nome}`).join(', ')}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto mt-2 md:mt-0 pt-2 md:pt-0 border-t border-dashed md:border-0 border-gray-200">
+                      <span className="text-2xl font-black text-gray-800">R$ {v.total.toFixed(2)}</span>
+                      <button onClick={() => confirmarVinculoVenda(v)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-xl active:scale-95 transition-transform shadow-md">
+                        Vincular
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: LANÇAR DÉBITO MANUAL                               */}
+      {/* ========================================================= */}
+      {modalNovoDebito && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <header className="bg-red-50 border-b border-red-100 p-5 flex justify-between items-center">
+              <h3 className="font-black text-xl text-red-600">Compra Avulsa</h3>
+              <button onClick={() => setModalNovoDebito(false)} className="text-red-400 hover:text-red-600 bg-red-100 p-2 rounded-xl"><X size={20} /></button>
+            </header>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Valor da Compra (R$) *</label>
+                <input type="number" autoFocus value={novoDebito.valor_total} onChange={e => setNovoDebito({...novoDebito, valor_total: e.target.value})} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-black text-2xl text-red-600 outline-none focus:bg-white focus:border-red-400" placeholder="0.00" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Descrição da Compra</label>
+                <textarea value={novoDebito.descricao} onChange={e => setNovoDebito({...novoDebito, descricao: e.target.value})} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-medium outline-none focus:bg-white focus:border-red-400" placeholder="Ex: Cerveja, Carvão e Carne..." rows={2} />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Entrada Inicial (R$)</label>
+                <input type="number" value={novoDebito.valor_pago_inicial} onChange={e => setNovoDebito({...novoDebito, valor_pago_inicial: e.target.value})} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-bold text-gray-700 outline-none focus:bg-white focus:border-red-400" placeholder="Se ele pagou algo na hora..." />
+              </div>
+              <button onClick={salvarDebitoManual} className="w-full mt-2 py-4 bg-red-600 text-white font-bold rounded-2xl hover:bg-red-700 shadow-lg shadow-red-500/30 active:scale-95 transition-transform">Lançar Dívida</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: ABATER DÍVIDA                                      */}
+      {/* ========================================================= */}
+      {modalPagamento && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <header className="bg-green-50 border-b border-green-100 p-6 text-center relative">
+              <button onClick={() => setModalPagamento(false)} className="absolute right-4 top-4 text-green-600 hover:text-green-800 bg-green-200/50 p-2 rounded-xl"><X size={20} /></button>
+              <h3 className="font-black text-xl text-green-700 mb-1">Receber Pagamento</h3>
+              <p className="text-sm font-bold text-gray-500">Dívida de R$ {clienteSelecionado?.saldoDevido.toFixed(2)}</p>
+            </header>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Valor Recebido (R$) *</label>
+                <input type="number" autoFocus value={novoPagamento.valor} onChange={e => setNovoPagamento({...novoPagamento, valor: e.target.value})} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-black text-3xl text-center text-green-600 outline-none focus:bg-white focus:border-green-400" placeholder="0.00" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => setNovoPagamento({...novoPagamento, metodo_pagamento: 'dinheiro'})} className={`py-3 rounded-xl font-bold border-2 transition-colors ${novoPagamento.metodo_pagamento === 'dinheiro' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 bg-white'}`}>💵 Dinheiro</button>
+                <button onClick={() => setNovoPagamento({...novoPagamento, metodo_pagamento: 'pix'})} className={`py-3 rounded-xl font-bold border-2 transition-colors ${novoPagamento.metodo_pagamento === 'pix' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 bg-white'}`}>💠 Pix</button>
+                <button onClick={() => setNovoPagamento({...novoPagamento, metodo_pagamento: 'credito'})} className={`py-3 rounded-xl font-bold border-2 transition-colors ${novoPagamento.metodo_pagamento === 'credito' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 bg-white'}`}>💳 Crédito</button>
+                <button onClick={() => setNovoPagamento({...novoPagamento, metodo_pagamento: 'debito'})} className={`py-3 rounded-xl font-bold border-2 transition-colors ${novoPagamento.metodo_pagamento === 'debito' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 bg-white'}`}>💳 Débito</button>
+              </div>
+              <button onClick={salvarPagamento} className="w-full mt-4 py-4 bg-green-500 text-white font-bold rounded-2xl hover:bg-green-600 shadow-lg shadow-green-500/30 active:scale-95 transition-transform">Confirmar Abatimento</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
