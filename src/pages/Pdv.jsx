@@ -6,13 +6,13 @@ import LeitorInterativo from '../components/LeitorInterativo'
 
 export default function Pdv() {
   const navigate = useNavigate()
-  
+
   // Estados do Estoque e Carrinho
   const [busca, setBusca] = useState('')
   const [carrinho, setCarrinho] = useState([])
   const [estoqueCompleto, setEstoqueCompleto] = useState([])
   const [resultadosBusca, setResultadosBusca] = useState([])
-  
+
   // Estados do PDV e Telas
   const [ultimoProduto, setUltimoProduto] = useState(null)
   const [modoRemocao, setModoRemocao] = useState(false)
@@ -24,7 +24,7 @@ export default function Pdv() {
   const [processandoVenda, setProcessandoVenda] = useState(false)
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
   const [cameraAtiva, setCameraAtiva] = useState(false)
-  
+
   // Estados do Extrato (Comprovante)
   const [ultimaVenda, setUltimaVenda] = useState(null)
   const [modalExtratoAberto, setModalExtratoAberto] = useState(false)
@@ -77,7 +77,7 @@ export default function Pdv() {
       navigate('/caixa')
       return
     }
-    
+
     const sessaoObjeto = JSON.parse(sessaoSalva)
     setSessaoAtiva(sessaoObjeto)
     carregarEstoque()
@@ -190,7 +190,7 @@ export default function Pdv() {
       setCarrinho(prev => {
         const itemExistente = prev.find(item => item.id === produto.id)
         if (itemExistente) {
-          // MODIFICADO: Retirada a trava de estoque limite na hora de bipar.
+          // Retirada a trava de estoque limite na hora de bipar.
           return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item)
         } else {
           return [...prev, { ...produto, qtd: 1 }]
@@ -206,7 +206,7 @@ export default function Pdv() {
     setCarrinho(prev => prev.map(item => {
       if (item.id === id) {
         const novaQtd = item.qtd + delta
-        // MODIFICADO: Retirada a trava de estoque limite aqui também
+        // Retirada a trava de estoque limite aqui também
         if (novaQtd > 0) return { ...item, qtd: novaQtd }
       }
       return item
@@ -234,8 +234,29 @@ export default function Pdv() {
         if (codigoFormatado.length > 2) {
           e.preventDefault()
           const produtoEncontrado = estoqueCompleto.find(p => p.codigo_barras === codigoFormatado)
-          if (produtoEncontrado) processarBipProduto(produtoEncontrado)
-          else alert(`Produto com código "${codigoFormatado}" não encontrado no cadastro!`)
+          if (produtoEncontrado) {
+             processarBipProduto(produtoEncontrado)
+          } else {
+             // MÁGICA DE CADASTRO RÁPIDO DO PDV (Caso não exista em nenhum lugar)
+             const criarProdutoRapido = window.confirm(`Produto "${codigoFormatado}" não encontrado. Deseja iniciar a venda dele informando o valor?`)
+             
+             if (criarProdutoRapido) {
+                const valorDigitado = window.prompt("Qual o preço de venda deste produto?")
+                if (valorDigitado && !isNaN(parseFloat(valorDigitado.replace(',', '.')))) {
+                   const precoVendaNovo = parseFloat(valorDigitado.replace(',', '.'))
+                   const produtoTemporario = {
+                      id: `temp_${Date.now()}`, // ID temporário, vai ser criado de verdade no finalizarCompra
+                      nome: `Produto Cód: ${codigoFormatado}`,
+                      codigo_barras: codigoFormatado,
+                      preco_venda: precoVendaNovo,
+                      preco_custo: precoVendaNovo * 0.5, // 50% estimativa básica
+                      estoqueTotal: 0,
+                      isNew: true // Flag importante
+                   }
+                   processarBipProduto(produtoTemporario)
+                }
+             }
+          }
           bufferLeitor.current = ''
         }
       } else if (e.key.length === 1) {
@@ -259,7 +280,7 @@ export default function Pdv() {
   const abrirModalPagamento = () => { setPagamentos([]); setModalAberto(true) }
 
   // ==========================================
-  // FINALIZAÇÃO DE VENDA (COM AUTO-AJUSTE DE ESTOQUE NEGATIVO)
+  // FINALIZAÇÃO DE VENDA (COM AUTO-AJUSTE E CRIAÇÃO RÁPIDA)
   // ==========================================
   const finalizarCompra = async () => {
     if (totalRecebido < total) {
@@ -285,11 +306,31 @@ export default function Pdv() {
 
       if (erroVenda) throw erroVenda
 
-      for (const item of carrinho) {
+      for (let item of carrinho) {
+        
+        let produtoIdOficial = item.id;
+        
+        // 1. SE O PRODUTO FOR TEMPORÁRIO (Criado pelo Bip Rápido no PDV)
+        if (item.isNew) {
+           const { data: novoProdOficial } = await supabase.from('produtos').insert([{
+              nome: item.nome,
+              codigo_barras: item.codigo_barras,
+              preco_venda: item.preco_venda,
+              preco_custo: item.preco_custo,
+              estoque: 0,
+              tipo: 'solo'
+           }]).select().single()
+           
+           if (novoProdOficial) {
+              produtoIdOficial = novoProdOficial.id;
+              item = { ...item, id: produtoIdOficial }; // Atualiza o ID no carrinho corrente
+           }
+        }
+
         let qtdRestanteParaBaixar = item.qtd
 
         const { data: lotes } = await supabase.from('estoque_lotes')
-          .select('*').eq('produto_id', item.id).gt('quantidade_atual', 0)
+          .select('*').eq('produto_id', produtoIdOficial).gt('quantidade_atual', 0)
 
         const lotesOrdenados = (lotes || []).sort((a, b) => {
           if (a.status === 'ativo' && b.status !== 'ativo') return -1;
@@ -297,7 +338,7 @@ export default function Pdv() {
           return new Date(a.criado_em) - new Date(b.criado_em);
         });
 
-        // Tenta baixar dos lotes existentes
+        // 2. Tenta baixar dos lotes existentes normalmente
         for (const lote of lotesOrdenados) {
           if (qtdRestanteParaBaixar <= 0) break;
           const qtdDeducao = Math.min(qtdRestanteParaBaixar, lote.quantidade_atual)
@@ -306,29 +347,29 @@ export default function Pdv() {
 
           await supabase.from('estoque_lotes').update({ quantidade_atual: novaQtdLote, status: novoStatus }).eq('id', lote.id)
           await supabase.from('vendas_itens').insert([{
-            venda_id: vendaCadastrada.id, produto_id: item.id, nome: item.nome,
+            venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
             quantidade: qtdDeducao, preco_custo: lote.preco_custo, 
             preco_venda: item.preco_venda, loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
           }])
           qtdRestanteParaBaixar -= qtdDeducao
         }
 
-        // SE AINDA FALTA BAIXAR (Venda no Negativo / Estoque Invisível)
+        // 3. SE AINDA FALTA BAIXAR (Venda no Negativo / Estoque Invisível ou Produto Novo)
         if (qtdRestanteParaBaixar > 0) {
-          // Cria um lote "Fantasma/Ajuste" na hora com a quantidade que falta e já zera ele para concluir a venda
+          // Cria o lote "Fantasma/Ajuste"
           const { data: loteAjuste } = await supabase.from('estoque_lotes').insert([{
-            produto_id: item.id,
+            produto_id: produtoIdOficial,
             quantidade_inicial: qtdRestanteParaBaixar,
-            quantidade_atual: 0, // Já nasce zerado porque foi vendido na mesma hora
-            preco_custo: item.preco_venda * 0.5, // Puxa uma estimativa de 50% caso não tenha lote anterior
+            quantidade_atual: 0, // Zera na hora
+            preco_custo: item.preco_custo || (item.preco_venda * 0.5), 
             fornecedor: 'Ajuste Automático PDV',
             status: 'esgotado'
           }]).select().single()
 
-          // Registra o item na venda referenciando o preço desse lote fantasma
+          // Insere a venda referenciando o lote
           if (loteAjuste) {
             await supabase.from('vendas_itens').insert([{
-              venda_id: vendaCadastrada.id, produto_id: item.id, nome: item.nome,
+              venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
               quantidade: qtdRestanteParaBaixar, preco_custo: loteAjuste.preco_custo, 
               preco_venda: item.preco_venda, loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
             }])
@@ -336,7 +377,7 @@ export default function Pdv() {
         }
       }
 
-      // SALVA O EXTRATO DA VENDA PARA O MODAL DE COMPROVANTE
+      // 4. SALVA EXTRATO
       setUltimaVenda({
         id: vendaCadastrada.id,
         total: total,
@@ -348,7 +389,7 @@ export default function Pdv() {
       })
 
       alert("✅ Venda finalizada com sucesso!")
-      
+
       setCarrinho([])
       setUltimoProduto(null)
       localStorage.removeItem('volte_pdv_carrinho')
@@ -365,7 +406,7 @@ export default function Pdv() {
 
   return (
     <div className={`flex flex-col md:flex-row h-screen bg-gray-100 font-sans relative transition-all duration-300 ${modoRemocao ? 'ring-8 ring-red-500 inset-0' : ''}`}>
-      
+
       {modoRemocao && (
         <div className="absolute top-0 left-0 right-0 bg-red-600 text-white font-bold py-2 px-4 text-center z-50 flex items-center justify-center gap-2 shadow-lg animate-pulse">
           <MinusCircle size={20} />
@@ -380,7 +421,7 @@ export default function Pdv() {
             <button onClick={() => navigate('/caixa')} className="text-gray-500 hover:text-gray-800 font-bold px-3 py-2 bg-gray-100 rounded-lg shrink-0">← Painel</button>
             <h1 className="text-xl font-bold text-blue-700 whitespace-nowrap hidden sm:block">Caixa: {sessaoAtiva?.operador || '...'}</h1>
           </div>
-          
+
           <div className="flex gap-2">
             <button 
               onClick={() => {
@@ -388,7 +429,7 @@ export default function Pdv() {
               }} 
               className="text-red-500 hover:text-red-700 font-bold px-3 py-2 hover:bg-red-50 rounded-lg transition-colors border border-red-200 text-sm shrink-0"
             >Limpar</button>
-            
+
             <button 
               onClick={() => setModalExtratoAberto(true)} 
               disabled={!ultimaVenda}
@@ -419,7 +460,6 @@ export default function Pdv() {
                 <button key={p.id} onClick={() => adicionarAoCarrinho(p)} className="w-full text-left p-4 hover:bg-blue-50 border-b border-gray-100 flex justify-between items-center transition-colors">
                   <div>
                     <div className="font-bold text-gray-800">{p.nome}</div>
-                    {/* MODIFICADO: Aviso visual se o item for adicionado sem estoque */}
                     <div className="text-sm flex gap-2">
                        <span className={p.estoqueTotal > 0 ? "text-gray-500" : "text-red-500 font-bold"}>
                          Estoque: {p.estoqueTotal}
@@ -441,8 +481,8 @@ export default function Pdv() {
               <div className="flex-1">
                 <h3 className="font-bold text-gray-800 flex items-center gap-2">
                    {item.nome}
-                   {item.qtd > item.estoqueTotal && (
-                      <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full uppercase font-bold" title="Venda de produto com estoque baixo. Será ajustado automaticamente.">Sem Estoque</span>
+                   {item.qtd > (item.estoqueTotal || 0) && (
+                      <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full uppercase font-bold" title="Venda de produto sem estoque suficiente. Será ajustado automaticamente.">Sem Estoque</span>
                    )}
                 </h3>
                 <p className="text-sm text-gray-500">R$ {Number(item.preco_venda).toFixed(2)} /unidade</p>
@@ -468,7 +508,7 @@ export default function Pdv() {
 
       {/* LADO DIREITO */}
       <div className="w-full md:w-[450px] bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-auto md:h-full z-20">
-        
+
         <div className="p-6 bg-gray-50 border-b border-gray-200">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Último Item Bipado</p>
           {ultimoProduto ? (
@@ -516,7 +556,7 @@ export default function Pdv() {
               <h2 className="text-xl font-bold flex items-center gap-2">🛒 Finalizar Venda</h2>
               <button onClick={() => setModalAberto(false)} className="text-blue-200 hover:text-white transition-colors"><X size={28} /></button>
             </header>
-            
+
             <div className="p-6 flex-1 overflow-y-auto">
               <div className="bg-gray-50 p-5 rounded-2xl border border-gray-200 mb-6 flex flex-col gap-2">
                 <div className="flex justify-between items-center text-gray-600"><span className="font-medium">Total da Compra</span><span className="font-bold text-lg">R$ {total.toFixed(2)}</span></div>
@@ -556,7 +596,6 @@ export default function Pdv() {
                             value={pag.valor} 
                             onChange={(e) => atualizarValorPagamento(pag.id, e.target.value)} 
                             onKeyDown={(e) => {
-                              // Se o usuário apertar Setas pra Cima/Baixo, bloqueia a mudança do número também
                               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
                             }}
                             className="w-full bg-gray-50 border border-gray-200 p-3 pl-10 rounded-xl font-bold text-lg text-gray-800 outline-none focus:bg-white focus:border-blue-400 transition-colors" 
@@ -588,13 +627,13 @@ export default function Pdv() {
             <div className="absolute top-0 left-0 right-0 h-3 bg-gray-800 flex justify-around">
                {[...Array(20)].map((_, i) => <div key={i} className="w-2 h-2 bg-white rounded-full -mt-1"></div>)}
             </div>
-            
+
             <header className="pt-8 pb-4 text-center border-b border-dashed border-gray-300 mx-6">
               <h2 className="text-xl font-black uppercase tracking-widest mb-1">Volte</h2>
               <h3 className="text-sm font-bold text-gray-500 uppercase">Comprovante de Venda</h3>
               <p className="text-xs text-gray-400 mt-2">{ultimaVenda.data.toLocaleDateString('pt-BR')} às {ultimaVenda.data.toLocaleTimeString('pt-BR')}</p>
             </header>
-            
+
             <div className="p-6 overflow-y-auto max-h-[50vh] scrollbar-thin">
               <div className="space-y-3 mb-6">
                 {ultimaVenda.itens.map((item, idx) => (
@@ -622,7 +661,7 @@ export default function Pdv() {
                 )}
               </div>
             </div>
-            
+
             {/* Efeito de serra no rodapé do cupom */}
             <div className="p-4 bg-gray-50 border-t border-gray-200 relative">
                <button onClick={() => setModalExtratoAberto(false)} className="w-full bg-blue-600 text-white font-bold font-sans py-3 rounded-xl hover:bg-blue-700 transition-colors shadow-md">
