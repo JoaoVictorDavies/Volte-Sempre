@@ -2,13 +2,17 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Wallet, Lock, Unlock, Clock, Calendar, TrendingUp, X, Receipt, ShoppingBag } from 'lucide-react'
+import { ArrowLeft, Wallet, Lock, Unlock, Clock, Calendar, TrendingUp, X, Receipt, ShoppingBag, Search, Filter, ArrowRight } from 'lucide-react'
 
 export default function Financeiro() {
   const navigate = useNavigate()
   
   const [caixas, setCaixas] = useState({ abertos: [], fechados: [] })
   const [carregando, setCarregando] = useState(true)
+  
+  // Estados de Filtro
+  const [filtroOperador, setFiltroOperador] = useState('')
+  const [filtroData, setFiltroData] = useState('')
   
   // Estados do Modal "Raio-X do Caixa"
   const [caixaSelecionado, setCaixaSelecionado] = useState(null)
@@ -51,7 +55,6 @@ export default function Financeiro() {
     setCarregandoDetalhes(true)
     
     try {
-      // Puxa as vendas E os itens vendidos nessas vendas de uma vez só!
       const { data: vendas, error } = await supabase
         .from('vendas')
         .select('*, vendas_itens(*)')
@@ -60,7 +63,6 @@ export default function Financeiro() {
 
       if (error) throw error
 
-      // Matemática Financeira
       let totalDinheiro = 0, totalPix = 0, totalCartao = 0
       let faturamentoTotal = 0, custoTotal = 0
 
@@ -73,7 +75,6 @@ export default function Financeiro() {
         else if (venda.metodo_pagamento === 'pix') totalPix += Number(venda.total)
         else totalCartao += Number(venda.total)
 
-        // Soma o custo das mercadorias vendidas
         venda.vendas_itens.forEach(item => {
           custoTotal += (Number(item.preco_custo) * item.quantidade)
         })
@@ -93,10 +94,39 @@ export default function Financeiro() {
     }
   }
 
-  const formatarData = (dataIso) => {
+  // Formatação de data com Dia da Semana (Ex: Segunda-feira, 15/08/2026 às 14:30)
+  const formatarDataComDia = (dataIso) => {
     if (!dataIso) return '--/--/----'
-    return new Date(dataIso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    const data = new Date(dataIso)
+    
+    const diaSemana = data.toLocaleDateString('pt-BR', { weekday: 'long' })
+    const dataFormatada = data.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    
+    const diaCapitalized = diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1)
+    
+    return `${diaCapitalized}, ${dataFormatada}`
   }
+
+  // ==========================================
+  // 3. LÓGICA DE FILTRAGEM DOS CAIXAS FECHADOS
+  // ==========================================
+  const doisDiasAtras = new Date()
+  doisDiasAtras.setDate(doisDiasAtras.getDate() - 2)
+  doisDiasAtras.setHours(0, 0, 0, 0)
+
+  const caixasFechadosFiltrados = caixas.fechados.filter(caixa => {
+    const dataAbertura = new Date(caixa.aberto_em)
+    const matchOperador = caixa.operador?.toLowerCase().includes(filtroOperador.toLowerCase())
+    const matchData = filtroData ? dataAbertura.toISOString().split('T')[0] === filtroData : true
+
+    // Se o usuário estiver pesquisando ativamente, ignora a regra dos 2 dias
+    if (filtroOperador || filtroData) {
+      return matchOperador && matchData
+    }
+
+    // Por padrão (sem filtros), mostra apenas os últimos 2 dias para não poluir
+    return dataAbertura >= doisDiasAtras
+  })
 
   // ==========================================
   // COMPONENTES MENORES (UI)
@@ -108,34 +138,44 @@ export default function Financeiro() {
         whileHover={{ scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
         onClick={() => abrirDetalhes(caixa)}
-        className="w-full bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all text-left flex flex-col justify-between"
+        className="group w-full bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all text-left flex flex-col justify-between h-full"
       >
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex items-center gap-3">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${isAberto ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
-              {isAberto ? <Unlock size={24} /> : <Lock size={24} />}
+        <div>
+          <div className="flex justify-between items-start mb-4">
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-colors ${isAberto ? 'bg-green-100 text-green-600 group-hover:bg-green-200' : 'bg-gray-100 text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-500'}`}>
+                {isAberto ? <Unlock size={24} /> : <Lock size={24} />}
+              </div>
+              <div>
+                <h3 className="font-bold text-[#1D1D1F] text-lg leading-tight truncate">{caixa.operador}</h3>
+                <p className="text-xs text-[#86868B] flex items-center gap-1 mt-0.5">
+                  <Calendar size={12} /> Abertura: {formatarDataComDia(caixa.aberto_em)}
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-[#1D1D1F] text-lg leading-tight">{caixa.operador}</h3>
-              <p className="text-xs text-[#86868B] flex items-center gap-1 mt-0.5">
-                <Calendar size={12} /> {formatarData(caixa.aberto_em)}
-              </p>
-            </div>
+            {isAberto && (
+              <span className="flex items-center gap-1.5 text-xs font-bold text-green-700 bg-green-50 px-3 py-1 rounded-full shrink-0">
+                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Ativo
+              </span>
+            )}
           </div>
-          {isAberto && (
-            <span className="flex items-center gap-1.5 text-xs font-bold text-green-700 bg-green-50 px-3 py-1 rounded-full">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Ativo
+          
+          <div className="bg-[#F5F5F7] p-3 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between text-sm gap-2">
+            <span className="text-[#86868B] font-medium flex items-center gap-1 shrink-0">
+              <Clock size={14} /> Fechamento:
             </span>
-          )}
+            <span className="font-bold text-[#1D1D1F] text-right">
+              {isAberto ? 'Em andamento...' : formatarDataComDia(caixa.fechado_em)}
+            </span>
+          </div>
         </div>
-        
-        <div className="bg-[#F5F5F7] p-3 rounded-xl flex items-center justify-between text-sm">
-          <span className="text-[#86868B] font-medium flex items-center gap-1">
-            <Clock size={14} /> Fechamento
+
+        {/* UX Melhorada: Call-to-action claro para ver o resumo */}
+        <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-blue-600 font-medium text-sm transition-colors group-hover:text-blue-700">
+          <span className="flex items-center gap-1.5">
+            <Wallet size={16} /> Ver Resumo Financeiro
           </span>
-          <span className="font-bold text-[#1D1D1F]">
-            {isAberto ? 'Em andamento...' : formatarData(caixa.fechado_em)}
-          </span>
+          <ArrowRight size={16} className="opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
         </div>
       </motion.button>
     )
@@ -143,28 +183,28 @@ export default function Financeiro() {
 
   return (
     <div className="min-h-screen bg-[#F5F5F7] p-4 md:p-8 animate-in fade-in duration-300 relative">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         
         {/* CABEÇALHO */}
         <header className="mb-10">
-          <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline focus:outline-none">
+          <button onClick={() => navigate('/admin-home')} className="text-blue-600 font-bold mb-4 flex items-center gap-1 hover:underline focus:outline-none w-fit">
             <ArrowLeft size={16} /> Voltar ao Painel
           </button>
           <h1 className="text-3xl font-bold text-[#1D1D1F]" style={{ letterSpacing: '-0.02em' }}>
             Extrato de Caixas
           </h1>
-          <p className="text-[#86868B] mt-1 text-sm">Acompanhe as sessões de venda da sua loja.</p>
+          <p className="text-[#86868B] mt-1 text-sm">Acompanhe as sessões de venda e resumos financeiros da sua loja.</p>
         </header>
 
         {carregando ? (
           <div className="text-center py-20 text-gray-500 font-bold animate-pulse">Buscando histórico financeiro...</div>
         ) : (
-          <div className="space-y-10">
+          <div className="space-y-12">
             
-            {/* SEÇÃO 1: CAIXAS ABERTOS */}
+            {/* SEÇÃO 1: CAIXAS ABERTOS (Sempre visíveis) */}
             <section>
               <h2 className="text-sm font-bold text-[#86868B] uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Unlock size={16} /> Caixas Operando Agora
+                <Unlock size={16} className="text-green-500" /> Caixas Operando Agora
               </h2>
               {caixas.abertos.length === 0 ? (
                 <div className="bg-white/50 border border-dashed border-gray-300 rounded-2xl p-6 text-center text-gray-500 text-sm">
@@ -179,18 +219,58 @@ export default function Financeiro() {
               )}
             </section>
 
-            {/* SEÇÃO 2: HISTÓRICO DE FECHADOS */}
+            {/* SEÇÃO 2: HISTÓRICO DE FECHADOS COM FILTRO */}
             <section>
-              <h2 className="text-sm font-bold text-[#86868B] uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Lock size={16} /> Histórico (Fechados)
-              </h2>
-              {caixas.fechados.length === 0 ? (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                <h2 className="text-sm font-bold text-[#86868B] uppercase tracking-widest flex items-center gap-2 shrink-0">
+                  <Lock size={16} /> Histórico de Caixas Fechados
+                </h2>
+
+                {/* BARRA DE FILTROS */}
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                  <div className="relative flex-1 sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input 
+                      type="text" 
+                      placeholder="Filtrar por funcionário..." 
+                      value={filtroOperador}
+                      onChange={(e) => setFiltroOperador(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 rounded-xl border border-gray-200 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="relative flex-1 sm:w-48">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input 
+                      type="date" 
+                      value={filtroData}
+                      onChange={(e) => setFiltroData(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 rounded-xl border border-gray-200 text-sm text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all"
+                    />
+                  </div>
+                  {(filtroOperador || filtroData) && (
+                    <button 
+                      onClick={() => { setFiltroOperador(''); setFiltroData('') }}
+                      className="px-3 py-2 text-sm text-red-500 hover:bg-red-50 rounded-xl transition-colors font-medium shrink-0"
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {!filtroOperador && !filtroData && (
+                <p className="text-xs text-gray-400 mb-4 bg-gray-100 w-fit px-3 py-1 rounded-full border border-gray-200">
+                  Exibindo por padrão apenas os caixas dos últimos 2 dias. Use os filtros para ver anteriores.
+                </p>
+              )}
+
+              {caixasFechadosFiltrados.length === 0 ? (
                 <div className="bg-white/50 border border-dashed border-gray-300 rounded-2xl p-6 text-center text-gray-500 text-sm">
-                  Nenhum histórico de caixa fechado.
+                  Nenhum caixa fechado encontrado com os filtros atuais.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {caixas.fechados.map(caixa => (
+                  {caixasFechadosFiltrados.map(caixa => (
                     <CaixaCard key={caixa.id} caixa={caixa} tipo="fechado" />
                   ))}
                 </div>
