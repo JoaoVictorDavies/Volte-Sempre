@@ -319,7 +319,8 @@ export default function Pdv() {
               preco_venda: item.preco_venda,
               preco_custo: item.preco_custo,
               estoque: 0,
-              tipo: 'solo'
+              tipo: 'solo',
+              loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
            }]).select().single()
            
            if (novoProdOficial) {
@@ -366,7 +367,8 @@ export default function Pdv() {
             quantidade_atual: 0, // Zera na hora
             preco_custo: item.preco_custo || (item.preco_venda * 0.5), 
             fornecedor: 'Ajuste Automático PDV',
-            status: 'esgotado'
+            status: 'esgotado',
+            loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
           }]).select().single()
 
           // Insere a venda referenciando o lote
@@ -382,20 +384,17 @@ export default function Pdv() {
         // ==========================================
         // INTELIGÊNCIA DE NOTIFICAÇÃO: AVISO DE ESTOQUE ZERADO
         // ==========================================
-        // Após todas as deduções de lotes (reais e fantasmas) para esse item da venda,
-        // nós calculamos como ficou o estoque total dele.
-        // Como o item do carrinho guarda o 'estoqueTotal' que o produto TINHA antes da venda,
-        // o novo estoque será: (estoque anterior) - (quantidade vendida).
         const estoqueTotalAnterior = item.estoqueTotal || 0;
         const estoqueAtualCalculado = estoqueTotalAnterior - item.qtd;
 
         // Se o estoque atual calculado ficou igual a 0 ou negativo, dispara o alerta!
-        // Não disparamos se o estoque já era 0 antes (senão toda venda no negativo avisa que zerou).
+        // Passamos o loja_id para que chegue no painel correto e usamos catch para evitar travar o PDV
         if (estoqueAtualCalculado <= 0 && estoqueTotalAnterior > 0) {
-          dispararNotificacao(
+          await dispararNotificacao(
             "⚠️ Produto Esgotado!", 
-            `Atenção! O estoque do produto "${item.nome}" acabou de zerar no caixa. Providencie reposição.`
-          );
+            `Atenção! O estoque do produto "${item.nome}" acabou de zerar no caixa. Providencie reposição.`,
+            sessaoAtiva?.loja_id
+          ).catch(err => console.error("Erro na notificação de estoque:", err));
         }
       }
 
@@ -412,12 +411,13 @@ export default function Pdv() {
 
       alert("✅ Venda finalizada com sucesso!")
       
-      // Notificação aprimorada com o nome do operador do caixa
+      // Notificação aprimorada com o nome do operador do caixa (e roteamento correto via loja_id)
       const operadorCaixa = sessaoAtiva ? sessaoAtiva.operador : 'Operador Desconhecido';
-      dispararNotificacao(
+      await dispararNotificacao(
         "💰 Nova Venda Fechada!", 
-        `Venda de R$ ${total.toFixed(2)} finalizada no caixa por ${operadorCaixa}. (Pgto: ${nomesMetodos})`
-      );
+        `Venda de R$ ${total.toFixed(2)} finalizada no caixa por ${operadorCaixa}. (Pgto: ${nomesMetodos})`,
+        sessaoAtiva?.loja_id
+      ).catch(err => console.error("Erro na notificação de venda:", err));
 
       setCarrinho([])
       setUltimoProduto(null)
