@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
+import { dispararNotificacao } from '../services/notificacoes' // Importando a notificação
 import { 
   UserPlus, Search, DollarSign, PlusCircle, CreditCard, 
-  ArrowLeft, Phone, Calendar, CheckCircle2, History, X, User, Edit3, Trash2, ShoppingBag
+  ArrowLeft, Phone, Calendar, CheckCircle2, History, X, User, Edit3, Trash2, ShoppingBag, AlertCircle
 } from 'lucide-react'
 
 export default function Fiado() {
@@ -93,14 +94,15 @@ export default function Fiado() {
   // 3. CRUD: SALVAR (NOVO/EDITAR) E EXCLUIR CLIENTE
   // ==========================================
   const salvarCliente = async () => {
-    if (!modalCliente.dados.nome) return alert("Por favor, digite o nome do cliente.")
+    const dados = modalCliente.dados
+    if (!dados.nome || dados.nome.trim() === '') return alert("Por favor, digite o nome do cliente.")
 
     try {
       const payload = {
-        nome: modalCliente.dados.nome,
-        telefone: modalCliente.dados.telefone || '',
-        limite_credito: parseFloat(modalCliente.dados.limite_credito) || 0,
-        observacoes: modalCliente.dados.observacoes || ''
+        nome: dados.nome.trim(),
+        telefone: dados.telefone || '',
+        limite_credito: parseFloat(dados.limite_credito) || 0,
+        observacoes: dados.observacoes || ''
       }
 
       let dataCli;
@@ -110,15 +112,21 @@ export default function Fiado() {
         dataCli = data
         alert("Cliente cadastrado com sucesso!")
       } else {
-        const { data, error } = await supabase.from('clientes').update(payload).eq('id', modalCliente.dados.id).select().single()
+        const { data, error } = await supabase.from('clientes').update(payload).eq('id', dados.id).select().single()
         if (error) throw error
         dataCli = data
         alert("Ficha atualizada com sucesso!")
       }
 
+      // CORREÇÃO: Limpa o estado corretamente e força atualização do cliente com saldo zerado temporário
       setModalCliente({ aberto: false, modo: 'novo', dados: {} })
+      
+      // Se for novo, garante que ele não dê erro de null pointer no saldoDevido
+      const clienteAtualizadoSeguro = { ...dataCli, saldoDevido: dataCli.saldoDevido || 0 }
+      
+      setClienteSelecionado(clienteAtualizadoSeguro)
       await carregarClientes()
-      setClienteSelecionado(dataCli)
+
     } catch (err) {
       alert("Erro ao salvar cliente: " + err.message)
     }
@@ -143,27 +151,28 @@ export default function Fiado() {
   }
 
   // ==========================================
-  // 4. VINCULAR VENDA DO PDV (IDEMPOTÊNCIA)
+  // 4. VINCULAR VENDA DO PDV (Apenas Fichas)
   // ==========================================
   const abrirModalVincular = async () => {
     setCarregandoVendas(true)
     setModalVincularVenda(true)
     try {
-      // 1. Busca as últimas 50 vendas finalizadas
+      // MODIFICAÇÃO: Busca apenas vendas que contém 'ficha' no método de pagamento
       const { data: vendas, error: errVendas } = await supabase
         .from('vendas')
-        .select('id, total, criado_em, vendas_itens(nome, quantidade)')
+        .select('id, total, criado_em, metodo_pagamento, vendas_itens(nome, quantidade)')
+        .ilike('metodo_pagamento', '%ficha%') 
         .order('criado_em', { ascending: false })
         .limit(50)
 
       if (errVendas) throw errVendas
 
-      // 2. Busca quais vendas já foram vinculadas ao fiado (qualquer cliente)
+      // Busca quais vendas já foram vinculadas ao fiado (para não duplicar)
       const { data: jaVinculadas } = await supabase.from('fiado_contas').select('venda_id').not('venda_id', 'is', null)
       const idsVinculados = jaVinculadas.map(v => v.venda_id)
 
-      // 3. Filtra mostrando apenas vendas limpas (Idempotência)
-      const disponiveis = vendas.filter(v => !idsVinculados.includes(v.id))
+      // Filtra mostrando apenas vendas marcadas como ficha que AINDA NÃO FORAM vinculadas
+      const disponiveis = (vendas || []).filter(v => !idsVinculados.includes(v.id))
       setVendasPdv(disponiveis)
     } catch (err) {
       alert("Erro ao buscar vendas do PDV.")
@@ -184,8 +193,14 @@ export default function Fiado() {
         valor_total: venda.total,
         valor_pago: 0,
         status: 'pendente',
-        descricao: `Venda via PDV: ${itensDesc}`
+        descricao: `Ficha PDV: ${itensDesc}`
       }])
+
+      // Dispara a notificação de nova dívida
+      await dispararNotificacao(
+        "📝 Nova Ficha Vinculada!", 
+        `Uma compra do caixa (R$ ${venda.total.toFixed(2)}) foi vinculada à ficha de ${clienteSelecionado.nome}.`
+      ).catch(err => console.error("Erro notificação:", err))
 
       alert("Compra vinculada com sucesso!")
       setModalVincularVenda(false)
@@ -225,6 +240,12 @@ export default function Fiado() {
         }])
       }
 
+      // Dispara a notificação
+      await dispararNotificacao(
+        "📝 Nova Dívida Adicionada", 
+        `Uma compra de R$ ${valor.toFixed(2)} foi adicionada à ficha de ${clienteSelecionado.nome}.`
+      ).catch(err => console.error("Erro notificação:", err))
+
       alert("Débito manual lançado!")
       setModalNovoDebito(false)
       setNovoDebito({ valor_total: '', descricao: '', valor_pago_inicial: '' })
@@ -241,6 +262,11 @@ export default function Fiado() {
   const salvarPagamento = async () => {
     let valorAbater = parseFloat(novoPagamento.valor)
     if (!valorAbater || valorAbater <= 0) return alert("Informe um valor válido.")
+    
+    if (valorAbater > clienteSelecionado.saldoDevido) {
+      alert(`Você não pode abater mais do que o cliente deve (Máx: R$ ${clienteSelecionado.saldoDevido.toFixed(2)})`)
+      return
+    }
 
     try {
       await supabase.from('fiado_pagamentos').insert([{
@@ -270,6 +296,12 @@ export default function Fiado() {
         valorAbater -= abatimento
       }
 
+      // Notificação de Abatimento
+      await dispararNotificacao(
+        "💵 Pagamento Recebido!", 
+        `${clienteSelecionado.nome} abateu R$ ${Number(novoPagamento.valor).toFixed(2)} da sua dívida.`
+      ).catch(err => console.error("Erro notificação:", err))
+
       alert("Pagamento registrado com sucesso!")
       setModalPagamento(false)
       setNovoPagamento({ valor: '', metodo_pagamento: 'pix', observacao: '' })
@@ -280,10 +312,14 @@ export default function Fiado() {
     }
   }
 
+  // Filtros de busca e separação por devedores e em dia
   const clientesFiltrados = clientes.filter(c => 
     c.nome.toLowerCase().includes(busca.toLowerCase()) || 
     (c.telefone && c.telefone.includes(busca))
   )
+
+  const devedores = clientesFiltrados.filter(c => c.saldoDevido > 0).sort((a, b) => b.saldoDevido - a.saldoDevido)
+  const emDia = clientesFiltrados.filter(c => c.saldoDevido <= 0).sort((a, b) => a.nome.localeCompare(b.nome))
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-[#F5F5F7] font-sans">
@@ -320,27 +356,66 @@ export default function Fiado() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto divide-y divide-gray-100">
-          {clientesFiltrados.map(cli => (
-            <button
-              key={cli.id}
-              onClick={() => setClienteSelecionado(cli)}
-              className={`w-full text-left p-4 hover:bg-blue-50 transition-colors flex justify-between items-center group ${clienteSelecionado?.id === cli.id ? 'bg-blue-50 border-l-4 border-blue-600' : 'border-l-4 border-transparent'}`}
-            >
-              <div>
-                <h3 className="font-bold text-gray-800">{cli.nome}</h3>
-                <p className="text-xs text-gray-400 mt-1">{cli.telefone || 'Sem telefone'}</p>
+        <div className="flex-1 overflow-y-auto divide-y divide-gray-100 pb-20">
+          
+          {/* SEÇÃO DE DEVEDORES */}
+          {devedores.length > 0 && (
+            <div>
+              <div className="bg-red-50 text-red-700 text-xs font-bold uppercase tracking-widest py-2 px-4 sticky top-0 flex items-center gap-2">
+                <AlertCircle size={14} /> Em Aberto ({devedores.length})
               </div>
-              <div className="text-right">
-                <span className={`text-sm font-black block ${cli.saldoDevido > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  R$ {cli.saldoDevido.toFixed(2)}
-                </span>
-                <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">
-                  {cli.saldoDevido > 0 ? 'Pendente' : 'Em dia'}
-                </span>
+              {devedores.map(cli => (
+                <button
+                  key={cli.id}
+                  onClick={() => setClienteSelecionado(cli)}
+                  className={`w-full text-left p-4 hover:bg-blue-50 transition-colors flex justify-between items-center group ${clienteSelecionado?.id === cli.id ? 'bg-blue-50 border-l-4 border-blue-600' : 'border-l-4 border-transparent'}`}
+                >
+                  <div>
+                    <h3 className="font-bold text-gray-800">{cli.nome}</h3>
+                    <p className="text-xs text-gray-400 mt-1">{cli.telefone || 'Sem telefone'}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm font-black block text-red-600">
+                      R$ {cli.saldoDevido.toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-red-400 uppercase font-bold tracking-wider">
+                      Pendente
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* SEÇÃO EM DIA */}
+          {emDia.length > 0 && (
+            <div>
+              <div className="bg-green-50 text-green-700 text-xs font-bold uppercase tracking-widest py-2 px-4 sticky top-0 flex items-center gap-2 border-t border-gray-200">
+                <CheckCircle2 size={14} /> Em Dia ({emDia.length})
               </div>
-            </button>
-          ))}
+              {emDia.map(cli => (
+                <button
+                  key={cli.id}
+                  onClick={() => setClienteSelecionado(cli)}
+                  className={`w-full text-left p-4 hover:bg-blue-50 transition-colors flex justify-between items-center group ${clienteSelecionado?.id === cli.id ? 'bg-blue-50 border-l-4 border-blue-600' : 'border-l-4 border-transparent'}`}
+                >
+                  <div>
+                    <h3 className="font-bold text-gray-800">{cli.nome}</h3>
+                    <p className="text-xs text-gray-400 mt-1">{cli.telefone || 'Sem telefone'}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-sm font-black block text-green-600">
+                      R$ 0.00
+                    </span>
+                    <span className="text-[10px] text-green-500 uppercase font-bold tracking-wider">
+                      Limpo
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
           {clientesFiltrados.length === 0 && !carregando && (
             <div className="p-8 text-center text-gray-400 text-sm font-medium">Nenhum cliente encontrado.</div>
           )}
@@ -352,7 +427,7 @@ export default function Fiado() {
           ========================================= */}
       <div className="flex-1 flex flex-col h-[50vh] md:h-full overflow-y-auto bg-[#F5F5F7] relative">
         {clienteSelecionado ? (
-          <div className="p-4 md:p-8 max-w-5xl mx-auto w-full space-y-6 animate-in slide-in-from-right-4">
+          <div className="p-4 md:p-8 max-w-5xl mx-auto w-full space-y-6 animate-in slide-in-from-right-4 pb-20">
             
             {/* CABEÇALHO */}
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -373,9 +448,13 @@ export default function Fiado() {
                 </div>
               </div>
 
-              <div className="bg-red-50 border border-red-100 p-5 rounded-2xl w-full md:w-auto text-right shadow-inner">
-                <span className="text-xs font-bold text-red-400 uppercase tracking-widest block mb-1">Dívida Total</span>
-                <span className="text-4xl font-black text-red-600">R$ {clienteSelecionado.saldoDevido.toFixed(2)}</span>
+              <div className={`${clienteSelecionado.saldoDevido > 0 ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'} border p-5 rounded-2xl w-full md:w-auto text-right shadow-inner`}>
+                <span className={`text-xs font-bold uppercase tracking-widest block mb-1 ${clienteSelecionado.saldoDevido > 0 ? 'text-red-400' : 'text-green-500'}`}>
+                  {clienteSelecionado.saldoDevido > 0 ? 'Dívida Total' : 'Tudo Certo'}
+                </span>
+                <span className={`text-4xl font-black ${clienteSelecionado.saldoDevido > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  R$ {clienteSelecionado.saldoDevido.toFixed(2)}
+                </span>
               </div>
             </div>
 
@@ -495,7 +574,7 @@ export default function Fiado() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1 block">Nome Completo</label>
-                <input type="text" value={modalCliente.dados.nome || ''} onChange={e => setModalCliente(p => ({...p, dados: {...p.dados, nome: e.target.value}}))} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-bold text-gray-800 outline-none focus:bg-white focus:border-blue-500" placeholder="Nome do cliente..." />
+                <input type="text" autoFocus value={modalCliente.dados.nome || ''} onChange={e => setModalCliente(p => ({...p, dados: {...p.dados, nome: e.target.value}}))} className="w-full bg-gray-50 border border-gray-200 p-4 rounded-xl font-bold text-gray-800 outline-none focus:bg-white focus:border-blue-500" placeholder="Nome do cliente..." />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -525,27 +604,32 @@ export default function Fiado() {
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
             <header className="bg-blue-600 p-6 text-white flex justify-between items-center">
               <div>
-                <h3 className="font-black text-xl">Vincular Venda do Caixa</h3>
-                <p className="text-blue-200 text-sm mt-1">Selecione a venda para lançar na ficha de {clienteSelecionado?.nome}</p>
+                <h3 className="font-black text-xl">Vincular Compra via Ficha</h3>
+                <p className="text-blue-200 text-sm mt-1">Selecione a venda do PDV para lançar na ficha de {clienteSelecionado?.nome}</p>
               </div>
               <button onClick={() => setModalVincularVenda(false)} className="text-blue-200 hover:text-white bg-blue-700/50 p-2 rounded-xl"><X size={24} /></button>
             </header>
             
             <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-3">
               {carregandoVendas ? (
-                <p className="text-center py-10 font-bold text-gray-400 animate-pulse">Buscando vendas no caixa...</p>
+                <p className="text-center py-10 font-bold text-gray-400 animate-pulse">Buscando vendas na ficha no caixa...</p>
               ) : vendasPdv.length === 0 ? (
                 <div className="text-center py-10 text-gray-500">
                   <ShoppingBag size={48} className="mx-auto text-gray-300 mb-4" />
-                  <p className="font-bold text-lg">Nenhuma venda disponível.</p>
-                  <p className="text-sm">Todas as vendas recentes já foram vinculadas ou o caixa está vazio.</p>
+                  <p className="font-bold text-lg">Nenhuma ficha pendente.</p>
+                  <p className="text-sm">Não há vendas finalizadas como "Ficha" esperando vínculo.</p>
                 </div>
               ) : (
                 vendasPdv.map(v => (
                   <div key={v.id} className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col md:flex-row justify-between md:items-center gap-4 hover:border-blue-300 transition-colors">
                     <div className="flex-1">
-                      <div className="text-xs font-bold text-white bg-gray-400 px-2 py-1 rounded inline-block mb-2">
-                        {new Date(v.criado_em).toLocaleTimeString('pt-BR')}
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-bold text-white bg-gray-400 px-2 py-1 rounded inline-block">
+                          {new Date(v.criado_em).toLocaleTimeString('pt-BR')}
+                        </span>
+                        <span className="text-[10px] font-black text-orange-600 bg-orange-100 border border-orange-200 px-2 py-0.5 rounded uppercase tracking-wider">
+                          Venda Ficha
+                        </span>
                       </div>
                       <p className="text-sm font-bold text-gray-700 line-clamp-2">
                         {v.vendas_itens?.map(i => `${i.quantidade}x ${i.nome}`).join(', ')}
@@ -554,7 +638,7 @@ export default function Fiado() {
                     <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto mt-2 md:mt-0 pt-2 md:pt-0 border-t border-dashed md:border-0 border-gray-200">
                       <span className="text-2xl font-black text-gray-800">R$ {v.total.toFixed(2)}</span>
                       <button onClick={() => confirmarVinculoVenda(v)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-xl active:scale-95 transition-transform shadow-md">
-                        Vincular
+                        Vincular a {clienteSelecionado?.nome.split(' ')[0]}
                       </button>
                     </div>
                   </div>
