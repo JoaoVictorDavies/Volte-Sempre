@@ -2,7 +2,7 @@ import { dispararNotificacao } from '../services/notificacoes'
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Camera, MinusCircle, ShoppingBag, X, Receipt, AlertCircle } from 'lucide-react'
+import { Camera, MinusCircle, ShoppingBag, X, Receipt, AlertCircle, NotepadText } from 'lucide-react'
 import LeitorInterativo from '../components/LeitorInterativo'
 
 // Função auxiliar para ignorar acentos e maiúsculas
@@ -51,7 +51,7 @@ export default function Pdv() {
   // Cálculos Financeiros Base
   const total = carrinho.reduce((acc, item) => acc + (item.qtd * item.preco_venda), 0)
   
-  // Separando o tipo de pagamento para impedir troco em PIX/Cartão
+  // Separando o tipo de pagamento para impedir troco em PIX/Cartão/Ficha
   const totalDinheiro = pagamentos.filter(p => p.metodo === 'dinheiro').reduce((acc, p) => acc + (parseFloat(p.valor) || 0), 0)
   const totalNaoDinheiro = pagamentos.filter(p => p.metodo !== 'dinheiro').reduce((acc, p) => acc + (parseFloat(p.valor) || 0), 0)
   const totalRecebido = totalDinheiro + totalNaoDinheiro
@@ -59,8 +59,8 @@ export default function Pdv() {
   const faltaPagar = Math.max(0, total - totalRecebido)
   const troco = Math.max(0, totalRecebido - total)
   
-  // Regra de Ouro: Pagamentos em cartão/pix não podem exceder o valor da compra
-  const isPagamentoInvalido = totalNaoDinheiro > (total + 0.05) // Margem de 0.05 para segurança de float no JS
+  // Regra de Ouro: Pagamentos que não são em espécie não podem exceder o valor da compra
+  const isPagamentoInvalido = totalNaoDinheiro > (total + 0.05) // Margem de 0.05 para segurança de precisão decimal
 
   useEffect(() => { carrinhoRef.current = carrinho }, [carrinho])
   useEffect(() => { ultimoProdutoRef.current = ultimoProduto }, [ultimoProduto])
@@ -200,7 +200,7 @@ export default function Pdv() {
   }
 
   // ==========================================
-  // BUSCA INTELIGENTE (Ignorando Case e Acentos)
+  // BUSCA INTELIGENTE
   // ==========================================
   useEffect(() => {
     if (busca.trim() === '') {
@@ -216,7 +216,6 @@ export default function Pdv() {
   }, [busca, estoqueCompleto])
 
   const lidarComProdutoNaoEncontrado = (codigo) => {
-    // Usamos um tempo de tolerância para não jogar sujeira na tela
     setTimeout(() => {
       const criarProdutoRapido = window.confirm(`Produto "${codigo}" não encontrado. Deseja iniciar a venda dele informando o valor?`)
       if (criarProdutoRapido) {
@@ -282,13 +281,11 @@ export default function Pdv() {
   const removerDoCarrinho = (id) => setCarrinho(prev => prev.filter(item => item.id !== id))
 
   // ==========================================
-  // LISTENER GLOBAL (Quando o foco está FORA do Input)
+  // LISTENER GLOBAL E INPUT DE BUSCA
   // ==========================================
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
       if (modalAberto || modalExtratoAberto) return
-
-      // Se o usuário estiver focado no campo de busca, deixa o onKeyDown do campo resolver sozinho
       if (document.activeElement.tagName === 'INPUT') return
 
       if (e.code === 'Space') {
@@ -298,7 +295,6 @@ export default function Pdv() {
       }
 
       const agora = Date.now()
-      // Margem ampliada para 200ms para evitar quebra na leitura do bipador
       if (agora - ultimoTempoDigitação.current > 200) bufferLeitor.current = '' 
       ultimoTempoDigitação.current = agora
 
@@ -323,7 +319,6 @@ export default function Pdv() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown)
   }, [estoqueCompleto, modoRemocao, modalAberto, modalExtratoAberto])
 
-  // LISTENER DO INPUT DE BUSCA (Quando bipam/teclam dentro da Lupa)
   const handleInputKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -331,33 +326,27 @@ export default function Pdv() {
       if (!termo) return
 
       const termoNorm = normalizarBusca(termo)
-
-      // 1º Tenta Exato no código de barras
       const exatoCodigo = estoqueCompleto.find(p => p.codigo_barras && normalizarBusca(p.codigo_barras) === termoNorm)
       if (exatoCodigo) return processarBipProduto(exatoCodigo)
 
-      // 2º Tenta Exato no Nome
       const exatoNome = estoqueCompleto.find(p => normalizarBusca(p.nome) === termoNorm)
       if (exatoNome) return processarBipProduto(exatoNome)
 
-      // 3º Se só tem 1 opção filtrada na tela, bipa ela direto
       if (resultadosBusca.length === 1) return processarBipProduto(resultadosBusca[0])
 
-      // 4º Se não achou nada
       lidarComProdutoNaoEncontrado(termo)
     }
   }
 
   // ==========================================
-  // FUNÇÕES DE PAGAMENTO
+  // FUNÇÕES DE PAGAMENTO (C/ FICHA/FIADO)
   // ==========================================
   const adicionarPagamento = (tipo) => {
     if (faltaPagar <= 0) return 
     
-    // Sugestão inteligente de valor
+    // Sugestão inteligente de valor para não dar troco no digital/ficha
     let valorSugerido = faltaPagar
     if (tipo !== 'dinheiro') {
-       // Se for digital, não deixamos sugerir além do total (prevenindo quebra de regra logo no click)
        const faltaPermitida = Math.max(0, total - totalNaoDinheiro)
        valorSugerido = Math.min(faltaPagar, faltaPermitida)
     }
@@ -382,14 +371,16 @@ export default function Pdv() {
     }
 
     if (isPagamentoInvalido) {
-      alert("Pagamentos via Pix/Cartão não podem gerar troco. Ajuste os valores.")
+      alert("Pagamentos via Pix, Cartão ou Ficha não podem gerar troco. Ajuste os valores.")
       return
     }
 
     setProcessandoVenda(true)
 
     try {
-      const nomesMetodos = pagamentos.map(p => p.metodo).join(', ')
+      // Extrai os métodos sem repetição (ex: 'dinheiro, credito, ficha')
+      const metodosUnicos = [...new Set(pagamentos.map(p => p.metodo))]
+      const nomesMetodos = metodosUnicos.join(', ')
 
       const { data: vendaCadastrada, error: erroVenda } = await supabase
         .from('vendas')
@@ -407,7 +398,6 @@ export default function Pdv() {
       for (let item of carrinho) {
         let produtoIdOficial = item.id;
         
-        // Cadastra produto temporário
         if (item.isNew) {
            const { data: novoProdOficial } = await supabase.from('produtos').insert([{
               nome: item.nome, codigo_barras: item.codigo_barras, preco_venda: item.preco_venda,
@@ -474,7 +464,6 @@ export default function Pdv() {
         }
       }
 
-      // 4. ATUALIZAR EXTRATO EM TEMPO REAL
       const novaVendaRegistrada = {
         id: vendaCadastrada.id,
         total: total,
@@ -491,7 +480,7 @@ export default function Pdv() {
       const operadorCaixa = sessaoAtiva ? sessaoAtiva.operador : 'Operador Desconhecido';
       await dispararNotificacao(
         "💰 Nova Venda Fechada!", 
-        `Venda de R$ ${total.toFixed(2)} finalizada no caixa por ${operadorCaixa}. (Pgto: ${nomesMetodos})`,
+        `Venda de R$ ${total.toFixed(2)} no caixa por ${operadorCaixa}. (Pgto: ${nomesMetodos})`,
         sessaoAtiva?.loja_id
       ).catch(err => console.error(err));
 
@@ -673,7 +662,7 @@ export default function Pdv() {
               {isPagamentoInvalido && (
                 <div className="mb-4 p-3 bg-red-100 border border-red-200 text-red-600 rounded-xl flex items-center gap-2 text-sm font-bold shadow-sm">
                   <AlertCircle size={18} />
-                  <span>Pagamentos via Pix/Cartão não podem exceder o total da compra (Não gera troco).</span>
+                  <span>Pagamentos via Pix, Cartão ou Ficha não podem exceder o total da compra (Não gera troco).</span>
                 </div>
               )}
 
@@ -690,10 +679,13 @@ export default function Pdv() {
               {faltaPagar > 0 && (
                 <div className="mb-6">
                   <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Selecione o(s) Pagamento(s)</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    {['pix', 'credito', 'debito', 'dinheiro'].map(tipo => (
-                      <button key={tipo} onClick={() => adicionarPagamento(tipo)} className="p-4 rounded-xl font-bold border-2 border-gray-200 text-gray-700 bg-white hover:bg-gray-50 hover:border-blue-300 transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95">
-                        {tipo === 'pix' ? '💠 Pix' : tipo === 'credito' ? '💳 Crédito' : tipo === 'debito' ? '💳 Débito' : '💵 Dinheiro'}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {['dinheiro', 'pix', 'credito', 'debito', 'ficha'].map(tipo => (
+                      <button key={tipo} onClick={() => adicionarPagamento(tipo)} className="p-3 rounded-xl font-bold border-2 border-gray-200 text-gray-700 bg-white hover:bg-gray-50 hover:border-blue-300 transition-all flex flex-col items-center justify-center gap-1 shadow-sm active:scale-95">
+                        <span className="text-xl">
+                          {tipo === 'dinheiro' ? '💵' : tipo === 'pix' ? '💠' : tipo === 'credito' ? '💳' : tipo === 'debito' ? '💳' : '📝'}
+                        </span>
+                        <span className="text-sm capitalize">{tipo === 'ficha' ? 'Fiado (Ficha)' : tipo}</span>
                       </button>
                     ))}
                   </div>
@@ -706,7 +698,9 @@ export default function Pdv() {
                   <div className="space-y-3">
                     {pagamentos.map((pag, index) => (
                       <div key={pag.id} className="flex items-center gap-3 bg-white p-3 rounded-2xl border-2 border-blue-100 shadow-sm">
-                        <div className="bg-blue-50 text-blue-700 font-bold px-3 py-2 rounded-lg text-sm w-24 text-center capitalize">{pag.metodo}</div>
+                        <div className="bg-blue-50 text-blue-700 font-bold px-3 py-2 rounded-lg text-sm w-28 text-center capitalize line-clamp-1 truncate">
+                          {pag.metodo === 'ficha' ? 'Ficha' : pag.metodo}
+                        </div>
                         <div className="flex-1 relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold">R$</span>
                           <input 
@@ -746,7 +740,6 @@ export default function Pdv() {
       {modalExtratoAberto && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 animate-in fade-in backdrop-blur-sm">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col relative font-mono text-gray-800">
-            {/* Efeito de serra no topo do cupom */}
             <div className="absolute top-0 left-0 right-0 h-3 bg-gray-800 flex justify-around">
                {[...Array(25)].map((_, i) => <div key={i} className="w-2 h-2 bg-white rounded-full -mt-1"></div>)}
             </div>
@@ -779,14 +772,25 @@ export default function Pdv() {
                       <span>TOTAL</span>
                       <span>R$ {venda.total.toFixed(2)}</span>
                     </div>
-                    <div className="flex justify-between text-sm text-gray-500">
-                      <span className="uppercase">PAGO VIA {venda.metodo_pagamento}</span>
+                    
+                    {/* Exibição descritiva dos métodos limpos (ex: pix, debito) */}
+                    <div className="flex justify-between text-sm text-gray-500 mt-1">
+                      <span className="uppercase font-bold">PAGO VIA {venda.metodo_pagamento}</span>
                       <span>R$ {venda.valor_recebido.toFixed(2)}</span>
                     </div>
+                    
                     {venda.troco > 0 && (
                       <div className="flex justify-between text-sm font-bold text-gray-600 pt-2 border-t border-dashed border-gray-200 mt-2">
                         <span>TROCO DEVOLVIDO</span>
                         <span>R$ {venda.troco.toFixed(2)}</span>
+                      </div>
+                    )}
+                    
+                    {/* Alerta Visual de Fiado no Extrato do Caixa */}
+                    {venda.metodo_pagamento.includes('ficha') && (
+                      <div className="flex items-center justify-between text-sm font-bold text-orange-600 bg-orange-50 px-3 py-2 rounded-lg mt-3 border border-orange-200">
+                        <span className="flex items-center gap-1.5"><NotepadText size={16} /> Fiado/Ficha</span>
+                        <span className="text-xs uppercase tracking-wider">Pendente de Associação</span>
                       </div>
                     )}
                   </div>
