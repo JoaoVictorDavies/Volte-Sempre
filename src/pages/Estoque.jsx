@@ -21,6 +21,13 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
   // Estado para feedback visual de cópia do código de barras
   const [codigoCopiado, setCodigoCopiado] = useState(false)
 
+  // ==========================================
+  // NOVOS ESTADOS: Edição Rápida de Lotes
+  // ==========================================
+  const [loteEmEdicao, setLoteEmEdicao] = useState(null)
+  const [novaQuantidadeLote, setNovaQuantidadeLote] = useState('')
+  const [salvandoLote, setSalvandoLote] = useState(false)
+
   // Verifica se o ID deste produto é o que foi encontrado pela câmera
   const isDestacado = produtoDestacadoId && produtoDestacadoId === produto.id
 
@@ -68,18 +75,30 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     setIsEditing(false)
   }
 
+  // EXCLUSÃO EM CASCATA (Corrige o erro de foreign key com vendas antigas)
   const handleExcluir = async (e) => {
     e.stopPropagation()
 
-    // Regra de Negócio: Se tem estoque, avisa. Se é zero, exclui direto.
+    // Regra de Negócio de Exclusão
     if (produto.estoqueReal > 0) {
-      const confirma = window.confirm(`ATENÇÃO! Esse produto tem ${produto.estoqueReal} itens no estoque. Excluir mesmo assim?`)
+      const confirma = window.confirm(`ATENÇÃO! Esse produto tem ${produto.estoqueReal} itens no estoque. Excluir permanentemente mesmo assim?`)
+      if (!confirma) return
+    } else {
+      const confirma = window.confirm(`Deseja realmente excluir este produto permanentemente do sistema?`)
       if (!confirma) return
     }
 
     setIsSaving(true)
     try {
+      // 1. Apaga dependências de lotes
+      await supabase.from('estoque_lotes').delete().eq('produto_id', produto.id)
+      
+      // 2. Apaga histórico nas vendas (libera a trava do banco)
+      await supabase.from('vendas_itens').delete().eq('produto_id', produto.id)
+
+      // 3. Exclui o produto definitivo
       const { error } = await supabase.from('produtos').delete().eq('id', produto.id)
+      
       if (error) throw error
 
       onAtualizar() // Recarrega a tela para o produto sumir
@@ -101,6 +120,44 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     setTimeout(() => {
       setCodigoCopiado(false)
     }, 2000)
+  }
+
+  // ==========================================
+  // FUNÇÕES DE EDIÇÃO DE LOTE
+  // ==========================================
+  const iniciarEdicaoLote = (lote) => {
+    setLoteEmEdicao(lote.id)
+    setNovaQuantidadeLote(lote.quantidade_atual.toString())
+  }
+
+  const cancelarEdicaoLote = () => {
+    setLoteEmEdicao(null)
+    setNovaQuantidadeLote('')
+  }
+
+  const salvarEdicaoLote = async (loteId) => {
+    const qtdParsed = parseInt(novaQuantidadeLote, 10)
+    if (isNaN(qtdParsed) || qtdParsed < 0) {
+      alert("Por favor, insira um número válido (0 ou maior).")
+      return
+    }
+
+    setSalvandoLote(true)
+    try {
+      const { error } = await supabase
+        .from('estoque_lotes')
+        .update({ quantidade_atual: qtdParsed })
+        .eq('id', loteId)
+
+      if (error) throw error
+
+      setLoteEmEdicao(null)
+      onAtualizar() // Recarrega os dados do estoque para atualizar o total e a lista
+    } catch (err) {
+      alert("Erro ao atualizar a quantidade do lote: " + err.message)
+    } finally {
+      setSalvandoLote(false)
+    }
   }
 
   return (
@@ -254,16 +311,48 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-6">
-                      <div className="text-right">
+                    <div className="flex items-center gap-4">
+                      <div className="text-right hidden sm:block">
                         <p className="text-xs text-gray-400">Valor Venda</p>
                         <p className="text-sm font-bold text-green-600 flex items-center gap-1">
                           <DollarSign size={12} /> {Number(produto.preco_venda).toFixed(2)}
                         </p>
                       </div>
-                      <div className="text-center bg-gray-100 px-3 py-1 rounded-md">
-                        <p className="text-xs text-gray-400">Restam</p>
-                        <p className="text-sm font-bold text-gray-800">{lote.quantidade_atual} un.</p>
+                      
+                      {/* === CONTROLE DE EDIÇÃO DE QUANTIDADE DO LOTE === */}
+                      <div className="flex items-center">
+                        {loteEmEdicao === lote.id ? (
+                          <div className="flex items-center gap-1 bg-white p-1 rounded-md border-2 border-blue-200 shadow-sm">
+                            <input 
+                              type="number"
+                              min="0"
+                              value={novaQuantidadeLote}
+                              onChange={(e) => setNovaQuantidadeLote(e.target.value)}
+                              className="w-14 text-center font-bold text-gray-800 border-none focus:outline-none focus:ring-0 p-1"
+                              autoFocus
+                            />
+                            <button onClick={() => salvarEdicaoLote(lote.id)} disabled={salvandoLote} className="p-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors">
+                              <Check size={16} />
+                            </button>
+                            <button onClick={cancelarEdicaoLote} disabled={salvandoLote} className="p-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 transition-colors">
+                              <X size={16} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="bg-gray-100 px-3 py-1.5 rounded-md flex items-center gap-3">
+                            <div>
+                              <p className="text-xs text-gray-400">Restam</p>
+                              <p className="text-sm font-bold text-gray-800">{lote.quantidade_atual} un.</p>
+                            </div>
+                            <button 
+                              onClick={() => iniciarEdicaoLote(lote)}
+                              className="text-gray-400 hover:text-blue-600 bg-white shadow-sm p-1 rounded transition-colors"
+                              title="Ajustar quantidade do lote"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
