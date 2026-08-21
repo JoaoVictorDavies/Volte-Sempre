@@ -322,12 +322,14 @@ export default function Fiado() {
   const emDia = clientesFiltrados.filter(c => c.saldoDevido <= 0).sort((a, b) => a.nome.localeCompare(b.nome))
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-[#F5F5F7] font-sans">
+    /* CONTAINER PRINCIPAL CORRIGIDO: h-screen sem dividir no meio, overflow-hidden para travar a rolagem geral */
+    <div className="flex h-screen bg-[#F5F5F7] font-sans overflow-hidden">
       
       {/* =========================================
           LADO ESQUERDO: LISTA DE CLIENTES
+          NO MOBILE: Esconde se tiver cliente selecionado, vira tela cheia.
           ========================================= */}
-      <div className="w-full md:w-[400px] bg-white border-r border-gray-200 flex flex-col h-[50vh] md:h-full z-10 shadow-sm">
+      <div className={`bg-white border-r border-gray-200 flex-col h-full z-10 shadow-sm shrink-0 transition-all ${clienteSelecionado ? 'hidden md:flex md:w-[400px]' : 'flex w-full md:w-[400px]'}`}>
         <header className="p-4 border-b border-gray-200 flex justify-between items-center bg-white sticky top-0">
           <div className="flex items-center gap-3">
             <button onClick={() => navigate('/caixa')} className="p-2 text-gray-400 hover:text-gray-800 rounded-xl hover:bg-gray-100 transition-colors">
@@ -424,20 +426,31 @@ export default function Fiado() {
 
       {/* =========================================
           LADO DIREITO: FICHA DO DEVEDOR
+          NO MOBILE: Esconde se NÃO tiver cliente selecionado. Vira tela cheia quando selecionado.
           ========================================= */}
-      <div className="flex-1 flex flex-col h-[50vh] md:h-full overflow-y-auto bg-[#F5F5F7] relative">
+      <div className={`flex-1 flex-col h-full overflow-y-auto bg-[#F5F5F7] relative w-full ${!clienteSelecionado ? 'hidden md:flex' : 'flex'}`}>
         {clienteSelecionado ? (
           <div className="p-4 md:p-8 max-w-5xl mx-auto w-full space-y-6 animate-in slide-in-from-right-4 pb-20">
             
-            {/* CABEÇALHO */}
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-              <div className="flex items-center gap-5">
-                <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner shrink-0">
-                  <User size={32} />
+            {/* CABEÇALHO DA FICHA */}
+            <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+              <div className="flex items-center gap-3 md:gap-5">
+                
+                {/* NOVO: Botão de voltar exclusivo para celular */}
+                <button 
+                  onClick={() => setClienteSelecionado(null)}
+                  className="md:hidden p-3 text-gray-500 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors shrink-0"
+                >
+                  <ArrowLeft size={24} />
+                </button>
+                
+                <div className="w-12 h-12 md:w-16 md:h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-inner shrink-0">
+                  <User size={28} className="md:w-8 md:h-8" />
                 </div>
+                
                 <div>
-                  <h2 className="text-2xl font-black text-gray-800">{clienteSelecionado.nome}</h2>
-                  <div className="flex gap-2 mt-2">
+                  <h2 className="text-xl md:text-2xl font-black text-gray-800 line-clamp-1">{clienteSelecionado.nome}</h2>
+                  <div className="flex flex-wrap gap-2 mt-2">
                     <button onClick={() => setModalCliente({ aberto: true, modo: 'editar', dados: clienteSelecionado })} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors">
                       <Edit3 size={14} /> Editar
                     </button>
@@ -452,7 +465,7 @@ export default function Fiado() {
                 <span className={`text-xs font-bold uppercase tracking-widest block mb-1 ${clienteSelecionado.saldoDevido > 0 ? 'text-red-400' : 'text-green-500'}`}>
                   {clienteSelecionado.saldoDevido > 0 ? 'Dívida Total' : 'Tudo Certo'}
                 </span>
-                <span className={`text-4xl font-black ${clienteSelecionado.saldoDevido > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                <span className={`text-3xl md:text-4xl font-black ${clienteSelecionado.saldoDevido > 0 ? 'text-red-600' : 'text-green-600'}`}>
                   R$ {clienteSelecionado.saldoDevido.toFixed(2)}
                 </span>
               </div>
@@ -562,7 +575,7 @@ export default function Fiado() {
       </div>
 
       {/* ========================================================= */}
-      {/* MODAL: CRIAR / EDITAR CLIENTE                             */}
+      {/* MODAIS (Lógica inalterada, mesmo funcionamento)           */}
       {/* ========================================================= */}
       {modalCliente.aberto && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
@@ -596,9 +609,6 @@ export default function Fiado() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL: VINCULAR VENDA DO PDV                              */}
-      {/* ========================================================= */}
       {modalVincularVenda && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -649,9 +659,6 @@ export default function Fiado() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL: LANÇAR DÉBITO MANUAL                               */}
-      {/* ========================================================= */}
       {modalNovoDebito && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -678,9 +685,6 @@ export default function Fiado() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL: ABATER DÍVIDA                                      */}
-      {/* ========================================================= */}
       {modalPagamento && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
