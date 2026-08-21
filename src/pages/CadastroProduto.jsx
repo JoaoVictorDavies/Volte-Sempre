@@ -132,10 +132,10 @@ export default function CadastroProduto() {
   const [carregando, setCarregando] = useState(false)
   const [buscando, setBuscando] = useState(false)
   const [sucesso, setSucesso] = useState(false)
-  
+
   const [cameraAtiva, setCameraAtiva] = useState(false)
   const [codigoLidoCamera, setCodigoLidoCamera] = useState(null)
-  
+
   const travaCameraRef = useRef(false)
 
   // Dados do Banco
@@ -152,7 +152,6 @@ export default function CadastroProduto() {
   })
 
   // === VALIDAÇÃO DE CAMPOS VAZIOS ===
-  // Se for Lote: precisa só das métricas do lote. Se for Novo: precisa de Nome também.
   const formValido = isLoteMode 
     ? (dados.estoque !== '' && dados.precoCusto !== '' && dados.precoVenda !== '')
     : (dados.nome.trim() !== '' && dados.estoque !== '' && dados.precoCusto !== '' && dados.precoVenda !== '');
@@ -178,7 +177,6 @@ export default function CadastroProduto() {
   const avancar = () => { slideDirection = 1; setEtapa(e => e + 1) }
   const voltar = () => { slideDirection = -1; setEtapa(e => e - 1) }
 
-  // Buscando o produto via input com INNER JOIN para pegar Marca, Setor e Estoque
   const handleBarcodeChange = (e) => {
     const codigo = e.target.value
     setDados(prev => ({ ...prev, codigoBarras: codigo }))
@@ -199,7 +197,7 @@ export default function CadastroProduto() {
             ? data.estoque_lotes.reduce((acc, lote) => acc + (lote.quantidade_atual || 0), 0) 
             : 0;
           data.estoqueTotal = estoqueTotal;
-          
+
           setProdutoExistente(data)
           setDados(prev => ({ ...prev, nome: data.nome, precoVenda: data.preco_venda }))
         } else {
@@ -227,7 +225,6 @@ export default function CadastroProduto() {
     setCodigoLidoCamera(codigo);
   }
 
-  // Buscando o produto via Câmera com INNER JOIN para pegar Marca, Setor e Estoque
   const confirmarCodigoLido = async () => {
     setCameraAtiva(false)
     setDados(prev => ({ ...prev, codigoBarras: codigoLidoCamera }))
@@ -235,7 +232,7 @@ export default function CadastroProduto() {
 
     const codigoFinal = codigoLidoCamera
     setCodigoLidoCamera(null)
-    
+
     setTimeout(() => { travaCameraRef.current = false }, 400)
 
     const { data } = await supabase
@@ -270,6 +267,33 @@ export default function CadastroProduto() {
     avancar()
   }
 
+  // ==========================================
+  // LÓGICA DE GERAR CÓDIGO/SKU AUTOMÁTICO
+  // ==========================================
+  const gerarCodigoUnico = async () => {
+    let isUnique = false;
+    let newCode = '';
+
+    while (!isUnique) {
+      // Gera um código de 12 dígitos, começando com '200' (Padrão para uso interno)
+      // Perfeito para imprimir como código de barras Code 128 depois.
+      newCode = '200' + Math.floor(100000000 + Math.random() * 900000000).toString();
+      
+      // Verifica se o código já existe no banco
+      const { data } = await supabase
+        .from('produtos')
+        .select('id')
+        .eq('codigo_barras', newCode)
+        .maybeSingle();
+        
+      // Se não retornou dados, o código é único e podemos sair do loop
+      if (!data) {
+        isUnique = true;
+      }
+    }
+    return newCode;
+  }
+
   async function finalizarCadastro() {
     setCarregando(true)
     try {
@@ -281,11 +305,19 @@ export default function CadastroProduto() {
           .update({ preco_venda: parseFloat(dados.precoVenda) || 0 })
           .eq('id', produtoId)
       } else {
+        // VERIFICAÇÃO INTELIGENTE DO CÓDIGO
+        let codigoFinal = dados.codigoBarras?.trim();
+        
+        // Se o usuário clicou em pular ou deixou vazio, gera um automático e único!
+        if (!codigoFinal) {
+          codigoFinal = await gerarCodigoUnico();
+        }
+
         const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
           nome: dados.nome,
           tipo: dados.tipo,
           preco_venda: parseFloat(dados.precoVenda) || 0,
-          codigo_barras: dados.codigoBarras || null,
+          codigo_barras: codigoFinal,
           marca_id: dados.marcaId,
           preco_custo: parseFloat(dados.precoCusto) || 0,
           estoque: parseInt(dados.estoque) || 0
@@ -403,9 +435,9 @@ export default function CadastroProduto() {
                       <div className="flex items-center gap-2 mb-3 text-green-700">
                         <CheckCircle size={20} /> <span className="font-bold">Produto Localizado!</span>
                       </div>
-                      
+
                       <p className="font-bold text-gray-800 text-lg leading-tight mb-3">{produtoExistente.nome}</p>
-                      
+
                       <div className="flex flex-col gap-2 text-sm text-gray-600 mb-5 bg-white p-3 rounded-xl border border-green-100 shadow-sm">
                         <div className="flex justify-between items-center">
                           <span className="font-medium text-gray-500">Preço:</span>
@@ -482,7 +514,7 @@ export default function CadastroProduto() {
                   <BackButton 
                     onClick={() => { 
                       setProdutoExistente(null); 
-                      setDados(prev => ({ ...prev, codigoBarras: '' })); // BUG CORRIGIDO AQUI: Limpa o input!
+                      setDados(prev => ({ ...prev, codigoBarras: '' })); 
                       voltar(); 
                     }} 
                     label="Voltar ao Leitor" 
@@ -581,7 +613,7 @@ export default function CadastroProduto() {
                 <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 mx-auto mb-5 shadow-inner">
                   <Barcode size={32} />
                 </div>
-                
+
                 <h3 className="font-mono text-xs uppercase tracking-widest text-gray-400 font-bold mb-1">Código Lido</h3>
                 <p className="text-3xl font-extrabold text-[#1D1D1F] mb-8 tracking-wider">{codigoLidoCamera}</p>
 
@@ -592,7 +624,7 @@ export default function CadastroProduto() {
                   >
                     <Check size={24} /> OK (Avançar)
                   </button>
-                  
+
                   <div className="grid grid-cols-2 gap-3 mt-2">
                     <button 
                       onClick={() => {
