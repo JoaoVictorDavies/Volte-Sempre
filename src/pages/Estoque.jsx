@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera, AlertCircle, Image as ImageIcon } from 'lucide-react'
+import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera, AlertCircle, Image as ImageIcon, Copy } from 'lucide-react'
 import LeitorCamera from '../components/LeitorCamera'
 import UploadFotoProduto from '../components/UploadFotoProduto' // ← Nosso novo componente!
 
 // Mini-componente para gerenciar a "gaveta" de lotes e a exibição de cada produto
 function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
   const [expandido, setExpandido] = useState(false)
-  
+
   // Estado para a Foto do Produto
   const [urlImagem, setUrlImagem] = useState(produto.imagem_url)
 
@@ -17,6 +17,9 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editNome, setEditNome] = useState(produto.nome)
   const [isSaving, setIsSaving] = useState(false)
+  
+  // Estado para feedback visual de cópia do código de barras
+  const [codigoCopiado, setCodigoCopiado] = useState(false)
 
   // Verifica se o ID deste produto é o que foi encontrado pela câmera
   const isDestacado = produtoDestacadoId && produtoDestacadoId === produto.id
@@ -40,7 +43,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
       setIsEditing(false)
       return
     }
-    
+
     setIsSaving(true)
     try {
       const { error } = await supabase
@@ -49,7 +52,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
         .eq('id', produto.id)
 
       if (error) throw error
-      
+
       setDisplayNome(editNome)
       setIsEditing(false)
     } catch (error) {
@@ -78,12 +81,26 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     try {
       const { error } = await supabase.from('produtos').delete().eq('id', produto.id)
       if (error) throw error
-      
+
       onAtualizar() // Recarrega a tela para o produto sumir
     } catch (error) {
       alert("Erro ao excluir o produto: " + error.message)
       setIsSaving(false)
     }
+  }
+
+  // Função para copiar o código de barras
+  const copiarCodigoBarras = (e) => {
+    e.stopPropagation()
+    if (!produto.codigo_barras) return
+
+    navigator.clipboard.writeText(produto.codigo_barras)
+    setCodigoCopiado(true)
+    
+    // Volta o ícone normal após 2 segundos
+    setTimeout(() => {
+      setCodigoCopiado(false)
+    }, 2000)
   }
 
   return (
@@ -101,7 +118,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
             {expandido ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
           </div>
           <div className="flex-1">
-            
+
             {/* MODO EDIÇÃO VS MODO VISUALIZAÇÃO */}
             {isEditing ? (
               <div className="flex items-center gap-2 mb-1" onClick={e => e.stopPropagation()}>
@@ -124,7 +141,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
                 <span className={`font-bold text-lg ${produto.estoqueReal === 0 ? 'text-gray-500' : 'text-gray-800'}`}>
                   {displayNome}
                 </span>
-                
+
                 <div className="flex items-center gap-1">
                   {/* Botão de Editar Nome */}
                   <button 
@@ -158,10 +175,28 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
               </div>
             )}
 
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs font-mono bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md">
-                Cód: {produto.codigo_barras || 'Sem código'}
-              </span>
+            <div className="flex items-center gap-2 mt-1">
+              {/* CÓDIGO DE BARRAS CLICÁVEL PARA COPIAR */}
+              <button 
+                onClick={copiarCodigoBarras}
+                disabled={!produto.codigo_barras}
+                title={produto.codigo_barras ? "Clique para copiar" : "Produto sem código"}
+                className={`flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-md transition-all active:scale-95 ${
+                  produto.codigo_barras 
+                    ? 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800 cursor-pointer border border-gray-200' 
+                    : 'bg-gray-50 text-gray-400 cursor-default'
+                }`}
+              >
+                <span>Cód: {produto.codigo_barras || 'Sem código'}</span>
+                {produto.codigo_barras && (
+                  codigoCopiado ? (
+                    <Check size={12} className="text-green-600" />
+                  ) : (
+                    <Copy size={12} className="text-gray-400" />
+                  )
+                )}
+              </button>
+
               <span className="text-xs text-gray-400">
                 {produto.lotesValidos.length} {produto.lotesValidos.length === 1 ? 'lote ativo' : 'lotes ativos'}
               </span>
@@ -183,7 +218,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
       {/* GAVETA EXPANDIDA (Foto + Lotes) */}
       {expandido && (
         <div className="bg-[#F9F9FB] border-t border-gray-100 p-5 flex flex-col md:flex-row gap-8">
-          
+
           {/* COLUNA ESQUERDA: FOTO */}
           <div className="flex flex-col items-start shrink-0">
             <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -201,14 +236,14 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
             <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
               <Package size={14} /> Detalhamento de Lotes (Fila)
             </h4>
-            
+
             {produto.lotesValidos.length === 0 ? (
               <p className="text-sm text-gray-500 italic">Nenhum lote com saldo disponível no momento.</p>
             ) : (
               <div className="space-y-2">
                 {produto.lotesValidos.map((lote, index) => (
                   <div key={lote.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                    
+
                     <div className="flex items-center gap-4">
                       <div className={`w-2 h-8 rounded-full ${lote.status === 'ativo' ? 'bg-green-400' : 'bg-orange-400'}`} title={`Status: ${lote.status}`}></div>
                       <div>
@@ -267,7 +302,7 @@ function MarcaItem({ marcaNome, produtos, onAtualizar, produtoDestacadoId }) {
         <div className="text-blue-500 flex items-center gap-2">
           {expandido ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
         </div>
-        
+
         {/* Pílula informativa mostrando a quantidade de itens na marca (só aparece se estiver fechado) */}
         {!expandido && (
           <span className="text-xs font-bold text-blue-400 bg-blue-50 px-2 py-1 rounded-lg ml-2">
@@ -275,7 +310,7 @@ function MarcaItem({ marcaNome, produtos, onAtualizar, produtoDestacadoId }) {
           </span>
         )}
       </div>
-      
+
       {/* LISTA DE PRODUTOS DA MARCA (Expansível) */}
       {expandido && (
         <div className="pl-0 md:pl-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -297,11 +332,11 @@ export default function Estoque() {
   const navigate = useNavigate()
   const [carregando, setCarregando] = useState(true)
   const [dadosAgrupados, setDadosAgrupados] = useState({})
-  
+
   // Estados para o Leitor de Câmera
   const [cameraAtiva, setCameraAtiva] = useState(false)
   const [produtoDestacadoId, setProdutoDestacadoId] = useState(null)
-  
+
   // Estado para quando a câmera lê um código inexistente
   const [codigoNaoEncontrado, setCodigoNaoEncontrado] = useState(null)
 
@@ -322,15 +357,15 @@ export default function Estoque() {
 
       resSetores.data.forEach(setor => {
         const dictMarcas = {}
-        
+
         const marcasDoSetor = resMarcas.data.filter(m => m.setor_id === setor.id)
         marcasDoSetor.forEach(marca => {
-          
+
           const produtosDaMarca = resProdutos.data.filter(p => p.marca_id === marca.id)
-          
+
           const produtosValidos = produtosDaMarca.map(p => {
             const lotesValidos = (p.estoque_lotes || []).filter(l => l.quantidade_atual > 0)
-            
+
             lotesValidos.sort((a, b) => {
               if (a.status === 'ativo' && b.status !== 'ativo') return -1;
               if (a.status !== 'ativo' && b.status === 'ativo') return 1;
@@ -338,7 +373,7 @@ export default function Estoque() {
             });
 
             const estoqueReal = lotesValidos.reduce((acc, lote) => acc + lote.quantidade_atual, 0)
-            
+
             return { ...p, lotesValidos, estoqueReal }
           })
 
@@ -367,7 +402,7 @@ export default function Estoque() {
   // Função disparada quando o componente sniper (LeitorCamera) finaliza a leitura
   const handleCameraSucesso = (codigo) => {
     setCameraAtiva(false)
-    
+
     // Busca o ID único do produto lido para evitar conflitos de "null" ou repetidos
     let idEncontrado = null
     Object.values(dadosAgrupados).forEach(marcas => {
@@ -401,7 +436,7 @@ export default function Estoque() {
           </h1>
           <p className="text-[#86868B] mt-1 text-sm">Controle detalhado de remessas e capital.</p>
         </div>
-        
+
         {/* Botão que aciona a Câmera */}
         <button 
           onClick={() => setCameraAtiva(true)}
@@ -423,7 +458,7 @@ export default function Estoque() {
         <div className="space-y-10">
           {Object.entries(dadosAgrupados).map(([setorNome, marcas]) => (
             <div key={setorNome} className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-              
+
               <div className="bg-[#1D1D1F] p-5">
                 <h2 className="text-white font-bold text-xl uppercase tracking-widest">{setorNome}</h2>
               </div>
@@ -461,13 +496,13 @@ export default function Estoque() {
             <div className="w-16 h-16 bg-red-50 border border-red-100 rounded-2xl flex items-center justify-center mx-auto mb-5 text-red-500">
               <AlertCircle size={32} />
             </div>
-            
+
             <h3 className="text-xl font-bold text-gray-800 mb-2">Produto não localizado</h3>
             <p className="text-gray-500 text-sm mb-4">
               O código <strong className="text-gray-800 font-mono text-base ml-1">{codigoNaoEncontrado}</strong> não foi encontrado.
             </p>
             <p className="text-gray-600 font-medium mb-8">Deseja registrar este produto em sua loja agora?</p>
-            
+
             <div className="flex flex-col gap-3">
               <button 
                 onClick={() => navigate('/cadastro-produto')}
