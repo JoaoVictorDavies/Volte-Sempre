@@ -31,10 +31,11 @@ export function AuthProvider({ children }) {
     if (error) {
       setProfile(null)
       setProfileError(error)
-      return
+      throw error
     }
 
     setProfile(data)
+    return data
   }, [])
 
   useEffect(() => {
@@ -105,8 +106,11 @@ export function AuthProvider({ children }) {
 
   const retryProfile = useCallback(() => {
     setIsLoading(true)
-    loadProfile(session?.user ?? null)
-      .catch(setProfileError)
+    return loadProfile(session?.user ?? null)
+      .catch((error) => {
+        setProfileError(error)
+        return null
+      })
       .finally(() => setIsLoading(false))
   }, [loadProfile, session])
 

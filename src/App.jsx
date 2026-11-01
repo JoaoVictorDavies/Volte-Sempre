@@ -1,13 +1,15 @@
 import { useEffect, useRef } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import OneSignal from 'react-onesignal'
 
 import { AuthProvider } from './context/AuthProvider'
 import { useAuth } from './context/useAuth'
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
+import AuthCallback from './pages/AuthCallback'
 import Home from './pages/Home'
 import Login from './pages/Login'
+import Onboarding from './pages/Onboarding'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
 import RegistroIA from './pages/RegistroIA'
@@ -20,21 +22,6 @@ import CaixaHome from './pages/CaixaHome'
 import Pdv from './pages/Pdv'
 import Fiado from './pages/Fiado'
 import InstalacaoBanner from './components/InstalacaoBanner'
-
-function OAuthCallback() {
-  const navigate = useNavigate()
-  const { user, isLoading } = useAuth()
-
-  useEffect(() => {
-    if (!isLoading) navigate(user ? '/admin-home' : '/login', { replace: true })
-  }, [isLoading, navigate, user])
-
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-[#11100e] text-[#f8f6ef]">
-      <p role="status" className="text-sm text-white/65">Concluindo seu acesso seguro...</p>
-    </main>
-  )
-}
 
 function AppRoutes() {
   const { profile } = useAuth()
@@ -72,7 +59,8 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/auth/callback" element={<OAuthCallback />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/onboarding" element={<Onboarding />} />
 
         <Route element={<RequireAuth />}>
           <Route element={<Layout />}>

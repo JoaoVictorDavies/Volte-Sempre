@@ -8,4 +8,26 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const modulePath = id.replaceAll('\\', '/')
+          if (!modulePath.includes('/node_modules/')) return
+
+          if (
+            modulePath.includes('/node_modules/react/')
+            || modulePath.includes('/node_modules/react-dom/')
+            || modulePath.includes('/node_modules/scheduler/')
+            || modulePath.includes('/node_modules/@supabase/')
+            || modulePath.includes('/node_modules/react-router-dom/')
+            || modulePath.includes('/node_modules/@remix-run/')
+          ) {
+            return 'vendor'
+          }
+        },
+      },
+    },
+  },
 })
