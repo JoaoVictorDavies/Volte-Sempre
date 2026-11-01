@@ -45,7 +45,7 @@ export default function Onboarding() {
       if (!refreshedProfile) {
         throw new Error('A loja foi criada, mas não foi possível carregar seu perfil. Tente atualizar o perfil.')
       }
-      navigate('/admin-home', { replace: true })
+      navigate('/boas-vindas', { replace: true })
     } catch (error) {
       console.error('Erro ao criar loja:', error)
       setErro(error.message || 'Não foi possível criar a loja. Tente novamente.')

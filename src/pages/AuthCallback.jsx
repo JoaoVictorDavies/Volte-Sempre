@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth'
 import { supabase } from '../services/supabase'
+import { LEGAL_VERSION } from '../constants/legal'
 
 export default function AuthCallback() {
   const navigate = useNavigate()
@@ -10,8 +11,12 @@ export default function AuthCallback() {
   const [sessionChecked, setSessionChecked] = useState(false)
   const [sessionError, setSessionError] = useState(null)
   const [inviteError, setInviteError] = useState(null)
+  const [legalError, setLegalError] = useState(null)
   const hashCleaned = useRef(false)
   const inviteHandled = useRef(false)
+  const legalHandled = useRef(false)
+  const [legalConsentSaved, setLegalConsentSaved] = useState(false)
+  const [savingLegalConsent, setSavingLegalConsent] = useState(false)
   const [acceptingInvite, setAcceptingInvite] = useState(false)
 
   const inviteToken = new URLSearchParams(window.location.search).get('convite')
@@ -70,11 +75,39 @@ export default function AuthCallback() {
       return
     }
     if (user?.id !== callbackSession.user.id || isLoading) return
-    if (profileError || sessionError || inviteError) return
+    if (profileError || sessionError || inviteError || legalError) return
+
+    const pendingLegalConsent = window.sessionStorage.getItem('volte_aceite_legal_pendente')
+    if (pendingLegalConsent && !legalConsentSaved) {
+      if (legalHandled.current) return
+      legalHandled.current = true
+      setSavingLegalConsent(true)
+      void (async () => {
+        try {
+          const consent = JSON.parse(pendingLegalConsent)
+          if (consent.versao !== LEGAL_VERSION) {
+            throw new Error('A versão aceita dos documentos legais não é válida.')
+          }
+          const { error } = await supabase.rpc('registrar_aceite_legal', {
+            p_termos_versao: consent.versao,
+            p_privacidade_versao: consent.versao,
+          })
+          if (error) throw error
+          window.sessionStorage.removeItem('volte_aceite_legal_pendente')
+          setLegalConsentSaved(true)
+        } catch (error) {
+          console.error('Erro ao registrar aceite legal:', error)
+          setLegalError(error)
+        } finally {
+          setSavingLegalConsent(false)
+        }
+      })()
+      return
+    }
 
     if (profile?.ativo) {
       window.sessionStorage.removeItem('volte_convite_pendente')
-      navigate(profile.role === 'funcionario' ? '/caixa' : '/admin-home', { replace: true })
+      navigate('/boas-vindas', { replace: true })
       return
     }
 
@@ -99,7 +132,7 @@ export default function AuthCallback() {
           '',
           window.location.pathname,
         )
-        navigate('/caixa', { replace: true })
+        navigate('/boas-vindas', { replace: true })
       })
       .catch((error) => {
         console.error('Erro ao aceitar convite:', error)
@@ -111,6 +144,8 @@ export default function AuthCallback() {
     inviteError,
     inviteToken,
     isLoading,
+    legalConsentSaved,
+    legalError,
     navigate,
     profile,
     profileError,
@@ -120,8 +155,8 @@ export default function AuthCallback() {
     user,
   ])
 
-  if (sessionError || profileError || inviteError) {
-    const message = sessionError?.message ?? profileError?.message ?? inviteError.message
+  if (sessionError || profileError || inviteError || legalError) {
+    const message = sessionError?.message ?? profileError?.message ?? inviteError?.message ?? legalError?.message
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#11100e] px-5 text-[#f8f6ef]">
         <section className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center">
@@ -129,10 +164,10 @@ export default function AuthCallback() {
           <p className="mt-3 text-sm leading-6 text-white/60">{message}</p>
           <button
             type="button"
-            onClick={() => inviteError ? window.location.reload() : navigate('/login', { replace: true })}
+            onClick={() => (inviteError || legalError) ? window.location.reload() : navigate('/login', { replace: true })}
             className="mt-6 rounded-full bg-[#ffd60a] px-5 py-3 text-sm font-semibold text-[#17140a]"
           >
-            {inviteError ? 'Tentar convite novamente' : 'Voltar para o login'}
+            {(inviteError || legalError) ? 'Tentar novamente' : 'Voltar para o login'}
           </button>
         </section>
       </main>
@@ -142,7 +177,11 @@ export default function AuthCallback() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#11100e] text-[#f8f6ef]">
       <p role="status" className="text-sm text-white/65">
-        {acceptingInvite ? 'Confirmando seu convite...' : 'Concluindo seu acesso seguro...'}
+        {savingLegalConsent
+          ? 'Registrando seu aceite...'
+          : acceptingInvite
+            ? 'Confirmando seu convite...'
+            : 'Concluindo seu acesso seguro...'}
       </p>
     </main>
   )

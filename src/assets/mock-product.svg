@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 520" fill="none">
+  <defs>
+    <linearGradient id="backdrop" x1="72" y1="28" x2="568" y2="500" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8DB"/>
+      <stop offset="1" stop-color="#E9DAB5"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="241" y1="134" x2="410" y2="429" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F9D783" stop-opacity=".93"/>
+      <stop offset=".48" stop-color="#C58D3B" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#835B2A" stop-opacity=".96"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="271" y1="84" x2="373" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#42372B"/>
+      <stop offset="1" stop-color="#16130F"/>
+    </linearGradient>
+    <filter id="shadow" x="125" y="72" width="390" height="433" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="15"/>
+    </filter>
+  </defs>
+  <rect width="640" height="520" rx="34" fill="url(#backdrop)"/>
+  <circle cx="488" cy="111" r="77" fill="#FFFDF5" fill-opacity=".72"/>
+  <path d="M66 386c83-51 152-31 216 0s132 27 292-35v169H66V386Z" fill="#D9C497" fill-opacity=".45"/>
+  <path d="M140 421c61-42 119-35 179-4 60 32 126 36 193 8" stroke="#FFF9E8" stroke-width="3" stroke-linecap="round" stroke-opacity=".85"/>
+  <ellipse cx="325" cy="425" rx="143" ry="25" fill="#4B351F" fill-opacity=".24" filter="url(#shadow)"/>
+  <path d="M274 112c0-17 14-31 31-31h43c17 0 31 14 31 31v24h-105v-24Z" fill="url(#cap)"/>
+  <path d="M251 139h151c20 0 36 16 36 36v203c0 31-25 56-56 56H271c-31 0-56-25-56-56V175c0-20 16-36 36-36Z" fill="url(#glass)" stroke="#FFF3D1" stroke-width="5"/>
+  <path d="M245 190c0-15 12-27 27-27h109" stroke="#FFF8E8" stroke-width="8" stroke-linecap="round" stroke-opacity=".5"/>
+  <path d="M248 285c40-25 108-25 149 0v55c0 26-21 47-47 47h-55c-26 0-47-21-47-47v-55Z" fill="#FFF7E6" fill-opacity=".94"/>
+  <path d="M272 306c14-19 38-20 51 0 14-19 38-19 51 0-2 23-26 44-51 57-25-13-49-34-51-57Z" fill="#B56B39"/>
+  <text x="322" y="293" fill="#6E4E2D" font-family="Georgia,serif" font-size="12" letter-spacing="3" text-anchor="middle">VOLTE!SEMPRE</text>
+  <text x="322" y="380" fill="#76542E" font-family="Georgia,serif" font-size="12" letter-spacing="2" text-anchor="middle">FLORAL · 100 ml</text>
+  <path d="M118 180c-15-28-4-55 15-70 2 28-2 48-15 70Zm13 8c9-30 31-41 54-40-18 20-34 34-54 40Zm-24 13c-28-17-33-45-24-67 13 24 20 43 24 67Z" fill="#8B9A63" fill-opacity=".8"/>
+  <path d="M515 342c12-23 34-30 56-25-17 17-34 26-56 25Zm-7 12c-20-19-20-43-9-61 8 22 12 41 9 61Z" fill="#849260" fill-opacity=".76"/>
+</svg>

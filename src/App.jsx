@@ -7,11 +7,14 @@ import { useAuth } from './context/useAuth'
 import { supabase } from './services/supabase'
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
+import RequireLegalAcceptance from './components/RequireLegalAcceptance'
 import RequireRole from './components/RequireRole'
 import AuthCallback from './pages/AuthCallback'
+import BoasVindas from './pages/BoasVindas'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
+import Politicas from './pages/Politicas'
 import AdminHome from './pages/AdminHome'
 import CadastroProduto from './pages/CadastroProduto'
 import RegistroIA from './pages/RegistroIA'
@@ -90,23 +93,27 @@ function AppRoutes() {
         <Route path="/login" element={<Login />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/politicas" element={<Politicas />} />
 
         <Route element={<RequireAuth />}>
-          <Route element={<Layout />}>
-            <Route element={<RequireRole role="dono" />}>
-              <Route path="/admin-home" element={<AdminHome />} />
-              <Route path="/cadastro-produto" element={<CadastroProduto />} />
-              <Route path="/registro-ia" element={<RegistroIA />} />
-              <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
-              <Route path="/estoque" element={<Estoque />} />
-              <Route path="/financeiro" element={<Financeiro />} />
-              <Route path="/teste-impressora" element={<TesteImpressora />} />
-              <Route path="/equipe" element={<Equipe />} />
+          <Route path="/boas-vindas" element={<BoasVindas />} />
+          <Route element={<RequireLegalAcceptance />}>
+            <Route element={<Layout />}>
+              <Route element={<RequireRole role="dono" />}>
+                <Route path="/admin-home" element={<AdminHome />} />
+                <Route path="/cadastro-produto" element={<CadastroProduto />} />
+                <Route path="/registro-ia" element={<RegistroIA />} />
+                <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
+                <Route path="/estoque" element={<Estoque />} />
+                <Route path="/financeiro" element={<Financeiro />} />
+                <Route path="/teste-impressora" element={<TesteImpressora />} />
+                <Route path="/equipe" element={<Equipe />} />
+              </Route>
+              <Route path="/caixa" element={<CaixaHome />} />
             </Route>
-            <Route path="/caixa" element={<CaixaHome />} />
+            <Route path="/pdv" element={<Pdv />} />
+            <Route path="/fiado" element={<Fiado />} />
           </Route>
-          <Route path="/pdv" element={<Pdv />} />
-          <Route path="/fiado" element={<Fiado />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

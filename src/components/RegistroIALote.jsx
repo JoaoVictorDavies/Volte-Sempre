@@ -3,7 +3,7 @@ import { supabase } from '../services/supabase'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import imageCompression from 'browser-image-compression'
 import { motion } from 'framer-motion'
-import { Camera, Image as ImageIcon, Trash2, CheckCircle, PackagePlus, Loader2, Sparkles, DollarSign, Hash, Layers, Barcode } from 'lucide-react'
+import { Camera, FileText, Image as ImageIcon, Trash2, CheckCircle, PackagePlus, Loader2, Sparkles, DollarSign, Hash, Layers, Barcode } from 'lucide-react'
 import LeitorCamera from './LeitorCamera' // Importando o leitor de código
 import { useAuth } from '../context/useAuth'
 import { callIdempotentRpc } from '../services/idempotentRpc'
@@ -89,7 +89,7 @@ export default function RegistroIALote({ onVoltar }) {
     }
   }
 
-  // === PASSO 1.B: ADICIONAR FOTO (Com ou Sem Código) ===
+  // === PASSO 1.B: ADICIONAR FOTO OU PDF (Com ou Sem Código) ===
   const handleAdicionarFotos = async (event) => {
     const files = Array.from(event.target.files)
     if (!files.length) {
@@ -103,20 +103,35 @@ export default function RegistroIALote({ onVoltar }) {
     try {
       const novasFotos = []
       for (const file of files) {
-        const options = { maxSizeMB: 0.2, maxWidthOrHeight: 1200, useWebWorker: true, fileType: 'image/jpeg' }
-        const compressedFile = await imageCompression(file, options)
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+        if (!isPdf && !file.type.startsWith('image/')) {
+          throw new Error(`O arquivo "${file.name}" não é uma imagem ou PDF compatível.`)
+        }
+        if (isPdf && file.size > 15 * 1024 * 1024) {
+          throw new Error(`O PDF "${file.name}" excede o limite de 15 MB.`)
+        }
+        const processedFile = isPdf
+          ? file
+          : await imageCompression(file, {
+            maxSizeMB: 0.2,
+            maxWidthOrHeight: 1200,
+            useWebWorker: true,
+            fileType: 'image/jpeg',
+          })
         
         novasFotos.push({
-          id: Math.random().toString(36).substr(2, 9),
-          file: compressedFile,
-          previewUrl: URL.createObjectURL(compressedFile),
+          id: crypto.randomUUID(),
+          file: processedFile,
+          isPdf,
+          mimeType: isPdf ? 'application/pdf' : 'image/jpeg',
+          previewUrl: isPdf ? null : URL.createObjectURL(processedFile),
           codigoBarras: codigoPendente // Associa o código bipado à foto (ou null se foi direto na foto)
         })
       }
       
       setFilaFotos(prev => [...prev, ...novasFotos])
     } catch (error) {
-      alert("Erro ao preparar a imagem: " + error.message)
+      alert("Erro ao preparar o arquivo: " + error.message)
     } finally {
       setCarregando(false)
       setStatusIA('')
@@ -148,15 +163,16 @@ export default function RegistroIALote({ onVoltar }) {
         const fotoAtual = filaFotos[i]
         setStatusIA(`Lendo embalagem ${i + 1} de ${filaFotos.length}...`)
 
-        const base64Data = await new Promise((resolve) => {
+        const base64Data = await new Promise((resolve, reject) => {
           const reader = new FileReader()
           reader.readAsDataURL(fotoAtual.file)
-          reader.onloadend = () => resolve(reader.result.split(',')[1])
+          reader.onload = () => resolve(reader.result.split(',')[1])
+          reader.onerror = () => reject(reader.error || new Error('Não foi possível ler o arquivo selecionado.'))
         })
-        const imagePart = { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+        const imagePart = { inlineData: { data: base64Data, mimeType: fotoAtual.mimeType } }
 
         const prompt = `
-          Você é um assistente de perfumaria experiente. Analise a imagem desta embalagem.
+          Você é um assistente de perfumaria experiente. Analise esta imagem ou este PDF de produto.
           Extraia as informações e retorne APENAS um objeto JSON válido.
           O JSON deve conter exatamente estas 3 chaves:
           "nome": o nome completo do produto com volume (ex: Malbec Black Desodorante Colônia 100ml).
@@ -189,6 +205,8 @@ export default function RegistroIALote({ onVoltar }) {
         resultadosProcessados.push({
           idUnico: fotoAtual.id,
           arquivoOriginal: fotoAtual.file,
+          isPdf: fotoAtual.isPdf,
+          fileName: fotoAtual.file.name,
           previewUrl: fotoAtual.previewUrl,
           codigoBarras: fotoAtual.codigoBarras, // Repassa o código para a revisão!
           nome: jsonIA.nome || '',
@@ -245,7 +263,7 @@ export default function RegistroIALote({ onVoltar }) {
         setStatusIA(`Salvando item ${i + 1} de ${produtosLote.length}...`)
         
         let imageUrlFinal = null
-        if (prod.arquivoOriginal) {
+        if (prod.arquivoOriginal && !prod.isPdf) {
           const fileName = `ia_lote_${user.id}_${prod.idUnico}.jpg`
           const { error: uploadError } = await supabase.storage.from('produtos').upload(fileName, prod.arquivoOriginal, { upsert: true })
           if (uploadError) throw uploadError
@@ -331,7 +349,7 @@ export default function RegistroIALote({ onVoltar }) {
           <p className="text-gray-500 text-sm mb-6">Cadastre múltiplos itens. O fluxo ideal é Bipar o código e fotografar na sequência.</p>
           
           <input type="file" accept="image/*" capture="environment" ref={cameraFotoRef} onChange={handleAdicionarFotos} className="hidden" />
-          <input type="file" accept="image/*" multiple ref={galeriaFotoRef} onChange={handleAdicionarFotos} className="hidden" />
+          <input type="file" accept="image/*,application/pdf,.pdf" multiple ref={galeriaFotoRef} onChange={handleAdicionarFotos} className="hidden" />
 
           {/* NOVOS BOTÕES OTIMIZADOS */}
           <div className="flex flex-col gap-3 mb-6">
@@ -356,7 +374,14 @@ export default function RegistroIALote({ onVoltar }) {
               <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
                 {filaFotos.map((foto, index) => (
                   <div key={foto.id} className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border-2 border-white shadow-sm bg-gray-200 group">
-                    <img src={foto.previewUrl} alt={`Fila ${index}`} className="w-full h-full object-cover" />
+                    {foto.isPdf ? (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 bg-rose-50 text-rose-600">
+                        <FileText size={28} />
+                        <span className="max-w-[90%] truncate text-[9px] font-semibold">{foto.file.name}</span>
+                      </div>
+                    ) : (
+                      <img src={foto.previewUrl} alt={`Arquivo ${index + 1}`} className="w-full h-full object-cover" />
+                    )}
                     
                     {/* Indicador Visual se tem Código de Barras */}
                     {foto.codigoBarras && (
@@ -419,7 +444,14 @@ export default function RegistroIALote({ onVoltar }) {
 
                 <div className="flex gap-4 mb-5 mt-2">
                   <div className="w-20 h-20 shrink-0">
-                    <img src={produto.previewUrl} alt="Preview" className="w-full h-full object-cover rounded-xl shadow-sm border border-gray-100" />
+                    {produto.isPdf ? (
+                      <div className="flex h-full min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-rose-100 bg-rose-50 p-3 text-center text-rose-600">
+                        <FileText size={28} />
+                        <span className="max-w-full break-all text-[10px] font-semibold">{produto.fileName}</span>
+                      </div>
+                    ) : (
+                      <img src={produto.previewUrl} alt="Prévia do produto" className="w-full h-full rounded-xl border border-gray-100 object-cover shadow-sm" />
+                    )}
                   </div>
                   
                   <div className="flex-1 min-w-0 flex flex-col justify-center relative pr-8">

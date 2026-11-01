@@ -26,6 +26,16 @@ create table if not exists public.usuarios (
   unique (id, loja_id)
 );
 
+create table if not exists public.aceites_legais (
+  usuario_id uuid not null references auth.users(id) on delete cascade,
+  termos_versao text not null,
+  privacidade_versao text not null,
+  aceito_em timestamptz not null default now(),
+  primary key (usuario_id, termos_versao, privacidade_versao)
+);
+create index if not exists aceites_legais_usuario_data_idx
+  on public.aceites_legais (usuario_id, aceito_em desc);
+
 create table if not exists public.convites_loja (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
@@ -364,6 +374,48 @@ revoke all on function public.auth_user_is_google(uuid) from public, anon, authe
 grant execute on function public.minha_loja_id() to authenticated;
 grant execute on function public.sou_dono_da_loja() to authenticated;
 
+create or replace function public.registrar_aceite_legal(
+  p_termos_versao text,
+  p_privacidade_versao text
+)
+returns timestamptz
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_aceito_em timestamptz;
+begin
+  if v_user_id is null then
+    raise exception 'Autenticacao obrigatoria';
+  end if;
+  if p_termos_versao <> '1.0.0' or p_privacidade_versao <> '1.0.0' then
+    raise exception 'Versao dos documentos legais invalida';
+  end if;
+
+  insert into public.aceites_legais (
+    usuario_id, termos_versao, privacidade_versao, aceito_em
+  )
+  values (v_user_id, p_termos_versao, p_privacidade_versao, now())
+  on conflict (usuario_id, termos_versao, privacidade_versao) do nothing
+  returning aceito_em into v_aceito_em;
+
+  if v_aceito_em is null then
+    select aceito_em into v_aceito_em
+    from public.aceites_legais
+    where usuario_id = v_user_id
+      and termos_versao = p_termos_versao
+      and privacidade_versao = p_privacidade_versao;
+  end if;
+
+  return v_aceito_em;
+end
+$$;
+
+revoke all on function public.registrar_aceite_legal(text, text) from public, anon;
+grant execute on function public.registrar_aceite_legal(text, text) to authenticated;
+
 create or replace function public.criar_loja(p_nome text)
 returns uuid
 language plpgsql
@@ -517,6 +569,7 @@ grant execute on function public.aceitar_convite(uuid) to authenticated;
 
 alter table public.lojas enable row level security;
 alter table public.usuarios enable row level security;
+alter table public.aceites_legais enable row level security;
 alter table public.convites_loja enable row level security;
 alter table public.setores enable row level security;
 alter table public.marcas enable row level security;
@@ -531,6 +584,13 @@ alter table public.fiado_pagamentos enable row level security;
 alter table public.fichas_contas enable row level security;
 alter table public.fichas_pagamentos enable row level security;
 alter table public.onesignal_dispositivos enable row level security;
+
+drop policy if exists aceites_legais_select_self on public.aceites_legais;
+create policy aceites_legais_select_self on public.aceites_legais
+  for select to authenticated
+  using (usuario_id = (select auth.uid()));
+revoke all on public.aceites_legais from public, anon, authenticated;
+grant select on public.aceites_legais to authenticated;
 
 drop policy if exists lojas_select_tenant on public.lojas;
 create policy lojas_select_tenant on public.lojas
