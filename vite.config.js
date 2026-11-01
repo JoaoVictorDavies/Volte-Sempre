@@ -8,6 +8,10 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  server: {
+    port: 3000,
+    strictPort: true,
+  },
   build: {
     chunkSizeWarningLimit: 1000,
     rollupOptions: {

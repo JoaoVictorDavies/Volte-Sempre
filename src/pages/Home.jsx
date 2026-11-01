@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ArrowDownRight, ArrowRight, BarChart3, CreditCard, PackageCheck, ShieldCheck, Sparkles, Store } from 'lucide-react'
 import BrandLogo from '../components/BrandLogo'
 import AppByVolte from '../components/AppByVolte'
@@ -32,7 +33,8 @@ function getOAuthErrorMessage(errorCode) {
 }
 
 export default function Home() {
-  const { signInWithGoogle } = useAuth()
+  const navigate = useNavigate()
+  const { user, profile, isLoading, profileError, signInWithGoogle } = useAuth()
   const [erro, setErro] = useState(() => {
     const url = new URL(window.location.href)
     return url.searchParams.has('error')
@@ -40,6 +42,11 @@ export default function Home() {
       : ''
   })
   const [entrando, setEntrando] = useState(false)
+
+  useEffect(() => {
+    if (isLoading || !user || profileError) return
+    navigate(profile?.ativo ? '/admin-home' : '/onboarding', { replace: true })
+  }, [isLoading, navigate, profile, profileError, user])
 
   useEffect(() => {
     const url = new URL(window.location.href)
