@@ -1,9 +1,10 @@
 import { dispararNotificacao } from '../services/notificacoes'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, useId, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { Camera, MinusCircle, ShoppingBag, X, Receipt, AlertCircle, NotepadText } from 'lucide-react'
 import LeitorInterativo from '../components/LeitorInterativo'
+import { useAuth } from '../context/useAuth'
 
 // Função auxiliar para ignorar acentos e maiúsculas
 const normalizarBusca = (str) => {
@@ -13,12 +14,12 @@ const normalizarBusca = (str) => {
 
 export default function Pdv() {
   const navigate = useNavigate()
+  const { user, profile } = useAuth()
 
   // Estados do Estoque e Carrinho
   const [busca, setBusca] = useState('')
   const [carrinho, setCarrinho] = useState([])
   const [estoqueCompleto, setEstoqueCompleto] = useState([])
-  const [resultadosBusca, setResultadosBusca] = useState([])
 
   // Estados do PDV e Telas
   const [ultimoProduto, setUltimoProduto] = useState(null)
@@ -30,6 +31,7 @@ export default function Pdv() {
   const [pagamentos, setPagamentos] = useState([]) 
   const [processandoVenda, setProcessandoVenda] = useState(false)
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
+  const [sessaoValidada, setSessaoValidada] = useState(false)
   const [cameraAtiva, setCameraAtiva] = useState(false)
 
   // Estados do Extrato (Comprovante)
@@ -39,17 +41,29 @@ export default function Pdv() {
   // ==========================================
   // REF: MÁGICA DE SINCRONIZAÇÃO EM TEMPO REAL
   // ==========================================
-  const clientId = useRef(Math.random().toString(36).substring(7)) 
+  const clientId = useId()
   const channelRef = useRef(null) 
   const bloquearBroadcast = useRef(false) 
   const carrinhoRef = useRef(carrinho) 
   const ultimoProdutoRef = useRef(ultimoProduto)
 
   const bufferLeitor = useRef('')
-  const ultimoTempoDigitação = useRef(Date.now())
+  const ultimoTempoDigitação = useRef(0)
+  const paymentId = useRef(0)
 
   // Cálculos Financeiros Base
   const total = carrinho.reduce((acc, item) => acc + (item.qtd * item.preco_venda), 0)
+  const resultadosBusca = useMemo(() => {
+    if (busca.trim() === '') return []
+    const termo = normalizarBusca(busca)
+    return estoqueCompleto.filter((produto) => (
+      normalizarBusca(produto.nome).includes(termo)
+      || (produto.codigo_barras && normalizarBusca(produto.codigo_barras).includes(termo))
+    ))
+  }, [busca, estoqueCompleto])
+  const ultimoProdutoVisivel = ultimoProduto && carrinho.some(item => item.id === ultimoProduto.id)
+    ? ultimoProduto
+    : null
   
   // Separando o tipo de pagamento para impedir troco em PIX/Cartão/Ficha
   const totalDinheiro = pagamentos.filter(p => p.metodo === 'dinheiro').reduce((acc, p) => acc + (parseFloat(p.valor) || 0), 0)
@@ -63,7 +77,7 @@ export default function Pdv() {
   const isPagamentoInvalido = totalNaoDinheiro > (total + 0.05) // Margem de 0.05 para segurança de precisão decimal
 
   useEffect(() => { carrinhoRef.current = carrinho }, [carrinho])
-  useEffect(() => { ultimoProdutoRef.current = ultimoProduto }, [ultimoProduto])
+  useEffect(() => { ultimoProdutoRef.current = ultimoProdutoVisivel }, [ultimoProdutoVisivel])
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768)
@@ -71,96 +85,13 @@ export default function Pdv() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Desativa rolagem em campos numéricos
-  useEffect(() => {
-    const disableWheelOnNumberInputs = (e) => {
-      if (document.activeElement.type === 'number') e.preventDefault()
-    }
-    document.addEventListener('wheel', disableWheelOnNumberInputs, { passive: false })
-    return () => document.removeEventListener('wheel', disableWheelOnNumberInputs)
-  }, [])
-
-  // ==========================================
-  // 1. VERIFICAÇÃO DE SESSÃO E INÍCIO (CARGA)
-  // ==========================================
-  useEffect(() => {
-    const sessaoSalva = localStorage.getItem('volte_sessao_caixa')
-    if (!sessaoSalva) {
-      alert("Acesso negado! Por favor, insira seu PIN para abrir ou retomar um caixa.")
-      navigate('/caixa')
-      return
-    }
-
-    const sessaoObjeto = JSON.parse(sessaoSalva)
-    setSessaoAtiva(sessaoObjeto)
-    carregarEstoque()
-    carregarHistoricoSessao(sessaoObjeto.id)
-
-    const carrinhoSalvo = localStorage.getItem('volte_pdv_carrinho')
-    if (carrinhoSalvo) try { setCarrinho(JSON.parse(carrinhoSalvo)) } catch (e) {}
-
-    const ultimoProdutoSalvo = localStorage.getItem('volte_pdv_ultimo')
-    if (ultimoProdutoSalvo) try { setUltimoProduto(JSON.parse(ultimoProdutoSalvo)) } catch (e) {}
-
-    const myChannel = supabase.channel(`pdv_sync_${sessaoObjeto.id}`)
-
-    myChannel.on('broadcast', { event: 'sync_cart' }, (payload) => {
-      if (payload.payload.clientId !== clientId.current) {
-        bloquearBroadcast.current = true 
-        setCarrinho(payload.payload.carrinho)
-        setUltimoProduto(payload.payload.ultimoProduto)
-      }
-    })
-
-    myChannel.on('broadcast', { event: 'request_sync' }, (payload) => {
-      if (payload.payload.clientId !== clientId.current && carrinhoRef.current.length > 0) {
-        myChannel.send({
-          type: 'broadcast',
-          event: 'sync_cart',
-          payload: { clientId: clientId.current, carrinho: carrinhoRef.current, ultimoProduto: ultimoProdutoRef.current }
-        })
-      }
-    }).subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        myChannel.send({ type: 'broadcast', event: 'request_sync', payload: { clientId: clientId.current } })
-      }
-    })
-
-    channelRef.current = myChannel
-    return () => { supabase.removeChannel(myChannel) }
-  }, [navigate])
-
-  useEffect(() => {
-    localStorage.setItem('volte_pdv_carrinho', JSON.stringify(carrinho))
-    if (ultimoProduto) localStorage.setItem('volte_pdv_ultimo', JSON.stringify(ultimoProduto))
-    else localStorage.removeItem('volte_pdv_ultimo')
-
-    if (bloquearBroadcast.current) {
-      bloquearBroadcast.current = false
-      return
-    }
-
-    if (channelRef.current && channelRef.current.state === 'joined') {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'sync_cart',
-        payload: { clientId: clientId.current, carrinho, ultimoProduto }
-      }).catch(err => console.error("Erro no broadcast:", err))
-    }
-  }, [carrinho, ultimoProduto])
-
-  useEffect(() => {
-    if (ultimoProduto && !carrinho.find(item => item.id === ultimoProduto.id)) {
-      setUltimoProduto(null)
-    }
-  }, [carrinho, ultimoProduto])
-
-  // ==========================================
-  // CARREGAR DADOS (ESTOQUE E EXTRATO)
-  // ==========================================
-  const carregarEstoque = async () => {
+  const carregarEstoque = useCallback(async () => {
+    if (!profile) return
     try {
-      const { data, error } = await supabase.from('produtos').select('*, estoque_lotes(*)')
+      const { data, error } = await supabase
+        .from('produtos')
+        .select('*, estoque_lotes(*)')
+        .eq('loja_id', profile.loja_id)
       if (error) throw error
 
       const estoqueProcessado = (data || []).map(p => {
@@ -172,14 +103,15 @@ export default function Pdv() {
     } catch (error) {
       console.error("Erro ao carregar estoque:", error)
     }
-  }
+  }, [profile])
 
-  const carregarHistoricoSessao = async (sessaoId) => {
+  const carregarHistoricoSessao = useCallback(async (sessaoId) => {
     try {
       const { data, error } = await supabase
         .from('vendas')
         .select('*, vendas_itens(*)')
         .eq('sessao_id', sessaoId)
+        .eq('loja_id', profile.loja_id)
         .order('criado_em', { ascending: false })
 
       if (error) throw error
@@ -197,60 +129,138 @@ export default function Pdv() {
     } catch (error) {
       console.error("Erro ao carregar histórico da sessão:", error)
     }
-  }
+  }, [profile])
+
+  // Desativa rolagem em campos numéricos
+  useEffect(() => {
+    const disableWheelOnNumberInputs = (e) => {
+      if (document.activeElement.type === 'number') e.preventDefault()
+    }
+    document.addEventListener('wheel', disableWheelOnNumberInputs, { passive: false })
+    return () => document.removeEventListener('wheel', disableWheelOnNumberInputs)
+  }, [])
 
   // ==========================================
-  // BUSCA INTELIGENTE
+  // 1. VERIFICAÇÃO DE SESSÃO E INÍCIO (CARGA)
   // ==========================================
   useEffect(() => {
-    if (busca.trim() === '') {
-      setResultadosBusca([])
+    let active = true
+    let currentChannel
+
+    const iniciarSessao = async () => {
+      if (!user || !profile) return
+
+      try {
+        setSessaoValidada(false)
+        const sessaoSalva = localStorage.getItem('volte_sessao_caixa')
+        const sessaoId = sessaoSalva ? JSON.parse(sessaoSalva)?.id : null
+        if (!sessaoId) {
+          navigate('/caixa', { replace: true })
+          return
+        }
+
+        const { data: sessao, error } = await supabase
+          .from('caixa_sessoes')
+          .select('*')
+          .eq('id', sessaoId)
+          .eq('usuario_id', user.id)
+          .eq('loja_id', profile.loja_id)
+          .eq('status', 'aberto')
+          .maybeSingle()
+
+        if (error) throw error
+        if (!sessao) {
+          localStorage.removeItem('volte_sessao_caixa')
+          navigate('/caixa', { replace: true })
+          return
+        }
+
+        if (!active) return
+        setSessaoAtiva(sessao)
+        const carrinhoKey = `volte_pdv_carrinho_${user.id}`
+        const ultimoProdutoKey = `volte_pdv_ultimo_${user.id}`
+        const carrinhoSalvo = localStorage.getItem(carrinhoKey)
+        const ultimoProdutoSalvo = localStorage.getItem(ultimoProdutoKey)
+        if (carrinhoSalvo) setCarrinho(JSON.parse(carrinhoSalvo))
+        if (ultimoProdutoSalvo) setUltimoProduto(JSON.parse(ultimoProdutoSalvo))
+        setSessaoValidada(true)
+
+        await Promise.all([carregarEstoque(), carregarHistoricoSessao(sessao.id)])
+        if (!active) return
+
+        const myChannel = supabase.channel(`pdv_sync_${sessao.id}`)
+        myChannel.on('broadcast', { event: 'sync_cart' }, (payload) => {
+          if (payload.payload.clientId !== clientId) {
+            bloquearBroadcast.current = true
+            setCarrinho(payload.payload.carrinho)
+            setUltimoProduto(payload.payload.ultimoProduto)
+          }
+        })
+
+        myChannel.on('broadcast', { event: 'request_sync' }, (payload) => {
+          if (payload.payload.clientId !== clientId && carrinhoRef.current.length > 0) {
+            myChannel.send({
+              type: 'broadcast',
+              event: 'sync_cart',
+              payload: { clientId, carrinho: carrinhoRef.current, ultimoProduto: ultimoProdutoRef.current }
+            })
+          }
+        }).subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            myChannel.send({ type: 'broadcast', event: 'request_sync', payload: { clientId } })
+          }
+        })
+
+        currentChannel = myChannel
+        channelRef.current = myChannel
+      } catch (error) {
+        console.error('Erro ao validar sessão do caixa:', error)
+        localStorage.removeItem('volte_sessao_caixa')
+        navigate('/caixa', { replace: true })
+      }
+    }
+
+    iniciarSessao()
+    return () => {
+      active = false
+      if (currentChannel) supabase.removeChannel(currentChannel)
+    }
+  }, [carregarEstoque, carregarHistoricoSessao, clientId, navigate, profile, user])
+
+  useEffect(() => {
+    if (!user || !sessaoValidada) return
+    const carrinhoKey = `volte_pdv_carrinho_${user.id}`
+    const ultimoProdutoKey = `volte_pdv_ultimo_${user.id}`
+    localStorage.setItem(carrinhoKey, JSON.stringify(carrinho))
+    if (ultimoProdutoVisivel) localStorage.setItem(ultimoProdutoKey, JSON.stringify(ultimoProdutoVisivel))
+    else localStorage.removeItem(ultimoProdutoKey)
+
+    if (bloquearBroadcast.current) {
+      bloquearBroadcast.current = false
       return
     }
-    const termo = normalizarBusca(busca)
-    const filtrados = estoqueCompleto.filter(p => 
-      normalizarBusca(p.nome).includes(termo) || 
-      (p.codigo_barras && normalizarBusca(p.codigo_barras).includes(termo))
-    )
-    setResultadosBusca(filtrados)
-  }, [busca, estoqueCompleto])
 
-  const lidarComProdutoNaoEncontrado = (codigo) => {
-    setTimeout(() => {
-      const criarProdutoRapido = window.confirm(`Produto "${codigo}" não encontrado. Deseja iniciar a venda dele informando o valor?`)
-      if (criarProdutoRapido) {
-        const valorDigitado = window.prompt("Qual o preço de venda deste produto?")
-        if (valorDigitado && !isNaN(parseFloat(valorDigitado.replace(',', '.')))) {
-          const precoVendaNovo = parseFloat(valorDigitado.replace(',', '.'))
-          const produtoTemporario = {
-            id: `temp_${Date.now()}`, 
-            nome: `Produto Cód: ${codigo}`,
-            codigo_barras: codigo,
-            preco_venda: precoVendaNovo,
-            preco_custo: precoVendaNovo * 0.5,
-            estoqueTotal: 0,
-            isNew: true 
-          }
-          processarBipProduto(produtoTemporario)
-        }
-      }
-      setBusca('')
-    }, 100)
-  }
+    if (channelRef.current && channelRef.current.state === 'joined') {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'sync_cart',
+        payload: { clientId, carrinho, ultimoProduto: ultimoProdutoVisivel }
+      }).catch(err => console.error("Erro no broadcast:", err))
+    }
+  }, [carrinho, clientId, ultimoProdutoVisivel, sessaoValidada, user])
 
-  const processarBipProduto = (produto, forcarRemocao = false) => {
+  const processarBipProduto = useCallback((produto, forcarRemocao = false) => {
     setUltimoProduto(produto)
     const estaEmModoRemocao = forcarRemocao || modoRemocao
 
     if (estaEmModoRemocao) {
       setCarrinho(prev => {
         const itemExistente = prev.find(item => item.id === produto.id)
-        if (!itemExistente) return prev 
+        if (!itemExistente) return prev
         if (itemExistente.qtd > 1) {
           return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd - 1 } : item)
-        } else {
-          return prev.filter(item => item.id !== produto.id)
         }
+        return prev.filter(item => item.id !== produto.id)
       })
       setModoRemocao(false)
     } else {
@@ -258,13 +268,35 @@ export default function Pdv() {
         const itemExistente = prev.find(item => item.id === produto.id)
         if (itemExistente) {
           return prev.map(item => item.id === produto.id ? { ...item, qtd: item.qtd + 1 } : item)
-        } else {
-          return [...prev, { ...produto, qtd: 1 }]
         }
+        return [...prev, { ...produto, qtd: 1 }]
       })
     }
     setBusca('')
-  }
+  }, [modoRemocao])
+
+  const lidarComProdutoNaoEncontrado = useCallback((codigo) => {
+    setTimeout(() => {
+      const criarProdutoRapido = window.confirm(`Produto "${codigo}" não encontrado. Deseja iniciar a venda dele informando o valor?`)
+      if (criarProdutoRapido) {
+        const valorDigitado = window.prompt("Qual o preço de venda deste produto?")
+        if (valorDigitado && !isNaN(parseFloat(valorDigitado.replace(',', '.')))) {
+          const precoVendaNovo = parseFloat(valorDigitado.replace(',', '.'))
+          const produtoTemporario = {
+            id: `temp_${Date.now()}`,
+            nome: `Produto Cód: ${codigo}`,
+            codigo_barras: codigo,
+            preco_venda: precoVendaNovo,
+            preco_custo: precoVendaNovo * 0.5,
+            estoqueTotal: 0,
+            isNew: true
+          }
+          processarBipProduto(produtoTemporario)
+        }
+      }
+      setBusca('')
+    }, 100)
+  }, [processarBipProduto])
 
   const adicionarAoCarrinho = (produto) => processarBipProduto(produto, false)
 
@@ -317,7 +349,7 @@ export default function Pdv() {
     
     window.addEventListener('keydown', handleGlobalKeyDown)
     return () => window.removeEventListener('keydown', handleGlobalKeyDown)
-  }, [estoqueCompleto, modoRemocao, modalAberto, modalExtratoAberto])
+  }, [estoqueCompleto, lidarComProdutoNaoEncontrado, modoRemocao, modalAberto, modalExtratoAberto, processarBipProduto])
 
   const handleInputKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -351,7 +383,8 @@ export default function Pdv() {
        valorSugerido = Math.min(faltaPagar, faltaPermitida)
     }
 
-    setPagamentos([...pagamentos, { id: Date.now(), metodo: tipo, valor: valorSugerido.toFixed(2) }])
+    paymentId.current += 1
+    setPagamentos([...pagamentos, { id: paymentId.current, metodo: tipo, valor: valorSugerido.toFixed(2) }])
   }
 
   const atualizarValorPagamento = (id, novoValor) => {
@@ -365,6 +398,12 @@ export default function Pdv() {
   // FINALIZAÇÃO DE VENDA
   // ==========================================
   const finalizarCompra = async () => {
+    if (!user || !profile || !sessaoAtiva) {
+      alert('Seu acesso ao caixa expirou. Entre novamente para registrar a venda.')
+      navigate('/caixa', { replace: true })
+      return
+    }
+
     if (totalRecebido < total) {
       alert("O valor recebido ainda não cobre o total da compra!")
       return
@@ -389,8 +428,9 @@ export default function Pdv() {
           metodo_pagamento: nomesMetodos, 
           valor_recebido: totalRecebido,
           troco: troco > 0 ? troco : 0,
-          sessao_id: sessaoAtiva ? sessaoAtiva.id : null,
-          loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
+          sessao_id: sessaoAtiva.id,
+          loja_id: profile.loja_id,
+          usuario_id: user.id,
         }]).select().single()
 
       if (erroVenda) throw erroVenda
@@ -399,10 +439,11 @@ export default function Pdv() {
         let produtoIdOficial = item.id;
         
         if (item.isNew) {
-           const { data: novoProdOficial } = await supabase.from('produtos').insert([{
+           const { data: novoProdOficial, error: erroNovoProduto } = await supabase.from('produtos').insert([{
               nome: item.nome, codigo_barras: item.codigo_barras, preco_venda: item.preco_venda,
-              preco_custo: item.preco_custo, estoque: 0, tipo: 'solo', loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
+              preco_custo: item.preco_custo, estoque: 0, tipo: 'solo', loja_id: profile.loja_id
            }]).select().single()
+           if (erroNovoProduto) throw erroNovoProduto
            
            if (novoProdOficial) {
               produtoIdOficial = novoProdOficial.id;
@@ -411,8 +452,12 @@ export default function Pdv() {
         }
 
         let qtdRestanteParaBaixar = item.qtd
-        const { data: lotes } = await supabase.from('estoque_lotes')
-          .select('*').eq('produto_id', produtoIdOficial).gt('quantidade_atual', 0)
+        const { data: lotes, error: erroLotes } = await supabase.from('estoque_lotes')
+          .select('*')
+          .eq('loja_id', profile.loja_id)
+          .eq('produto_id', produtoIdOficial)
+          .gt('quantidade_atual', 0)
+        if (erroLotes) throw erroLotes
 
         const lotesOrdenados = (lotes || []).sort((a, b) => {
           if (a.status === 'ativo' && b.status !== 'ativo') return -1;
@@ -426,29 +471,41 @@ export default function Pdv() {
           const novaQtdLote = lote.quantidade_atual - qtdDeducao
           const novoStatus = novaQtdLote === 0 ? 'esgotado' : 'ativo'
 
-          await supabase.from('estoque_lotes').update({ quantidade_atual: novaQtdLote, status: novoStatus }).eq('id', lote.id)
-          await supabase.from('vendas_itens').insert([{
+          const { error: erroLote } = await supabase.from('estoque_lotes')
+            .update({ quantidade_atual: novaQtdLote, status: novoStatus })
+            .eq('id', lote.id)
+            .eq('loja_id', profile.loja_id)
+          if (erroLote) throw erroLote
+          const { error: erroItemVenda } = await supabase.from('vendas_itens').insert([{
             venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
             quantidade: qtdDeducao, preco_custo: lote.preco_custo, 
-            preco_venda: item.preco_venda, loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
+            preco_venda: item.preco_venda,
+            loja_id: profile.loja_id,
+            usuario_id: user.id,
           }])
+          if (erroItemVenda) throw erroItemVenda
           
           qtdRestanteParaBaixar -= qtdDeducao
         }
 
         if (qtdRestanteParaBaixar > 0) {
-          const { data: loteAjuste } = await supabase.from('estoque_lotes').insert([{
+          const { data: loteAjuste, error: erroLoteAjuste } = await supabase.from('estoque_lotes').insert([{
             produto_id: produtoIdOficial, quantidade_inicial: qtdRestanteParaBaixar, quantidade_atual: 0,
-            preco_custo: item.preco_custo || (item.preco_venda * 0.5), fornecedor: 'Ajuste Automático PDV',
-            status: 'esgotado', loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
+            preco_custo: item.preco_custo || (item.preco_venda * 0.5),
+            status: 'esgotado', loja_id: profile.loja_id
           }]).select().single()
+          if (erroLoteAjuste) throw erroLoteAjuste
+          if (!loteAjuste) throw new Error('Não foi possível registrar o ajuste de estoque.')
 
           if (loteAjuste) {
-            await supabase.from('vendas_itens').insert([{
+            const { error: erroItemVenda } = await supabase.from('vendas_itens').insert([{
               venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
               quantidade: qtdRestanteParaBaixar, preco_custo: loteAjuste.preco_custo, 
-              preco_venda: item.preco_venda, loja_id: sessaoAtiva ? sessaoAtiva.loja_id : null
+              preco_venda: item.preco_venda,
+              loja_id: profile.loja_id,
+              usuario_id: user.id,
             }])
+            if (erroItemVenda) throw erroItemVenda
           }
         }
 
@@ -486,8 +543,6 @@ export default function Pdv() {
 
       setCarrinho([])
       setUltimoProduto(null)
-      localStorage.removeItem('volte_pdv_carrinho')
-      localStorage.removeItem('volte_pdv_ultimo')
       setModalAberto(false)
       carregarEstoque()
 
@@ -611,17 +666,17 @@ export default function Pdv() {
       <div className="w-full md:w-[450px] bg-white shadow-2xl flex flex-col border-t-4 border-blue-500 md:border-t-0 md:border-l border-gray-200 h-auto md:h-full z-20">
         <div className="p-6 bg-gray-50 border-b border-gray-200">
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Último Item Bipado</p>
-          {ultimoProduto ? (
+          {ultimoProdutoVisivel ? (
             <div className="flex flex-col md:flex-row items-center md:items-start gap-6 bg-white p-6 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in">
               <div className="w-32 h-32 md:w-36 md:h-36 bg-gray-50 rounded-2xl overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center shadow-inner">
-                {ultimoProduto.imagem_url ? (
-                  <img src={ultimoProduto.imagem_url} alt={ultimoProduto.nome} className="w-full h-full object-cover" />
+                {ultimoProdutoVisivel.imagem_url ? (
+                  <img src={ultimoProdutoVisivel.imagem_url} alt={ultimoProdutoVisivel.nome} className="w-full h-full object-cover" />
                 ) : <ShoppingBag size={48} className="text-gray-300" />}
               </div>
               <div className="flex-1 min-w-0 text-center md:text-left flex flex-col justify-center h-full">
-                <h4 className="font-extrabold text-gray-800 text-lg md:text-xl leading-tight mb-2">{ultimoProduto.nome}</h4>
-                <p className="text-sm text-gray-400 mb-2 font-mono bg-gray-100 self-center md:self-start px-2 py-1 rounded">{ultimoProduto.codigo_barras || 'SEM CÓDIGO'}</p>
-                <p className="text-green-600 font-black text-3xl mt-auto">R$ {Number(ultimoProduto.preco_venda).toFixed(2)}</p>
+                <h4 className="font-extrabold text-gray-800 text-lg md:text-xl leading-tight mb-2">{ultimoProdutoVisivel.nome}</h4>
+                <p className="text-sm text-gray-400 mb-2 font-mono bg-gray-100 self-center md:self-start px-2 py-1 rounded">{ultimoProdutoVisivel.codigo_barras || 'SEM CÓDIGO'}</p>
+                <p className="text-green-600 font-black text-3xl mt-auto">R$ {Number(ultimoProdutoVisivel.preco_venda).toFixed(2)}</p>
               </div>
             </div>
           ) : (

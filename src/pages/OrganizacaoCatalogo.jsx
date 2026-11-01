@@ -4,6 +4,18 @@ import { supabase } from '../services/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, Layers, Tags, Plus, Trash2, Info, ChevronRight, ChevronDown, Package, Edit2, Check, X } from 'lucide-react'
 
+async function buscarSetores() {
+  const { data, error } = await supabase.from('setores').select('*').order('nome')
+  if (error) throw error
+  return data || []
+}
+
+async function buscarMarcas(setorId) {
+  const { data, error } = await supabase.from('marcas').select('*').eq('setor_id', setorId).order('nome')
+  if (error) throw error
+  return data || []
+}
+
 export default function OrganizacaoCatalogo() {
   const navigate = useNavigate()
 
@@ -30,44 +42,36 @@ export default function OrganizacaoCatalogo() {
   // 1. BUSCAR DADOS
   // ==========================================
   useEffect(() => {
-    carregarSetores()
+    let active = true
+    buscarSetores()
+      .then((data) => {
+        if (!active) return
+        setSetores(data)
+        setSetorSelecionado((atual) => (
+          atual ? data.find(setor => setor.id === atual.id) || null : null
+        ))
+      })
+      .catch((error) => {
+        console.error('Erro ao carregar setores:', error)
+      })
+      .finally(() => {
+        if (active) setCarregando(false)
+      })
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
-    if (setorSelecionado) {
-      carregarMarcas(setorSelecionado.id)
-    } else {
-      setMarcas([])
-    }
+    if (!setorSelecionado) return undefined
+    let active = true
+    buscarMarcas(setorSelecionado.id)
+      .then((data) => {
+        if (active) setMarcas(data)
+      })
+      .catch((error) => {
+        console.error('Erro ao carregar marcas:', error)
+      })
+    return () => { active = false }
   }, [setorSelecionado])
-
-  const carregarSetores = async () => {
-    setCarregando(true)
-    try {
-      const { data, error } = await supabase.from('setores').select('*').order('nome')
-      if (error) throw error
-      setSetores(data || [])
-      
-      if (setorSelecionado) {
-        const atualizado = data.find(s => s.id === setorSelecionado.id)
-        if (!atualizado) setSetorSelecionado(null)
-      }
-    } catch (error) {
-      console.error("Erro ao carregar setores:", error)
-    } finally {
-      setCarregando(false)
-    }
-  }
-
-  const carregarMarcas = async (setorId) => {
-    try {
-      const { data, error } = await supabase.from('marcas').select('*').eq('setor_id', setorId).order('nome')
-      if (error) throw error
-      setMarcas(data || [])
-    } catch (error) {
-      console.error("Erro ao carregar marcas:", error)
-    }
-  }
 
   // ==========================================
   // 2. CRUD SETORES
@@ -81,6 +85,7 @@ export default function OrganizacaoCatalogo() {
       setNovoSetor('')
       setSetores([...setores, data].sort((a, b) => a.nome.localeCompare(b.nome)))
       setSetorSelecionado(data)
+      setMarcas([])
     } catch (error) {
       alert("Erro ao adicionar setor: " + error.message)
     }
@@ -107,7 +112,10 @@ export default function OrganizacaoCatalogo() {
     try {
       const { error } = await supabase.from('setores').delete().eq('id', id)
       if (error) throw error
-      if (setorSelecionado?.id === id) setSetorSelecionado(null)
+      if (setorSelecionado?.id === id) {
+        setSetorSelecionado(null)
+        setMarcas([])
+      }
       setSetores(setores.filter(s => s.id !== id))
       setEditandoSetorId(null)
     } catch (error) {
@@ -240,7 +248,10 @@ export default function OrganizacaoCatalogo() {
                       </div>
                     ) : (
                       <div 
-                        onClick={() => setSetorSelecionado(setor)}
+                        onClick={() => {
+                          setSetorSelecionado(setor)
+                          setMarcas([])
+                        }}
                         className={`flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border-2 ${setorSelecionado?.id === setor.id ? 'bg-blue-50 border-blue-500' : 'bg-white border-gray-100 hover:border-blue-200'}`}
                       >
                         <span className={`font-bold ml-1 ${setorSelecionado?.id === setor.id ? 'text-blue-700' : 'text-gray-700'}`}>
@@ -349,7 +360,7 @@ export default function OrganizacaoCatalogo() {
               <div className={`p-2 rounded-xl ${!tutorialJaVisto && !tutorialAberto ? 'bg-white/10' : 'bg-blue-50 text-blue-500'}`}>
                 <Info size={20} />
               </div>
-              <span className="font-bold text-lg tracking-tight">Como organizar sua loja? (O Padrão VOLTE)</span>
+              <span className="font-bold text-lg tracking-tight">Como organizar sua loja? (O padrão Volte!Sempre)</span>
             </div>
             <motion.div animate={{ rotate: tutorialAberto ? 180 : 0 }}>
               <ChevronDown size={20} className={!tutorialJaVisto && !tutorialAberto ? 'text-gray-300' : 'text-gray-400'} />

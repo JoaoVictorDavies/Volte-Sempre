@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { dispararNotificacao } from '../services/notificacoes' // Importando a notificação
+import { useAuth } from '../context/useAuth'
 import { 
   UserPlus, Search, DollarSign, PlusCircle, CreditCard, 
-  ArrowLeft, Phone, Calendar, CheckCircle2, History, X, User, Edit3, Trash2, ShoppingBag, AlertCircle
+  ArrowLeft, Calendar, CheckCircle2, History, X, User, Edit3, Trash2, ShoppingBag, AlertCircle
 } from 'lucide-react'
 
 export default function Fiado() {
   const navigate = useNavigate()
+  const { user, profile } = useAuth()
 
   // Estados dos Dados
   const [clientes, setClientes] = useState([])
@@ -16,7 +18,7 @@ export default function Fiado() {
   const [extratoContas, setExtratoContas] = useState([])
   const [extratoPagamentos, setExtratoPagamentos] = useState([])
   const [busca, setBusca] = useState('')
-  const [carregando, setCarregando] = useState(false)
+  const [carregando, setCarregando] = useState(true)
 
   // Modais
   const [modalCliente, setModalCliente] = useState({ aberto: false, modo: 'novo', dados: {} })
@@ -32,63 +34,108 @@ export default function Fiado() {
   const [novoDebito, setNovoDebito] = useState({ valor_total: '', descricao: '', valor_pago_inicial: '' })
   const [novoPagamento, setNovoPagamento] = useState({ valor: '', metodo_pagamento: 'pix', observacao: '' })
 
-  useEffect(() => {
-    carregarClientes()
-  }, [])
-
-  useEffect(() => {
-    if (clienteSelecionado) {
-      carregarFichaCliente(clienteSelecionado.id)
-    }
-  }, [clienteSelecionado])
-
   // ==========================================
   // 1. CARREGAR CLIENTES E SOMA DOS SALDOS
   // ==========================================
-  const carregarClientes = async () => {
+  const buscarClientes = useCallback(async () => {
+    const { data: listaClientes, error: erroClientes } = await supabase
+      .from('clientes')
+      .select('*')
+      .order('nome')
+    if (erroClientes) throw erroClientes
+
+    const { data: contas, error: erroContas } = await supabase
+      .from('fiado_contas')
+      .select('*')
+      .neq('status', 'paga')
+    if (erroContas) throw erroContas
+
+    return (listaClientes || []).map((cliente) => {
+      const contasDoCliente = (contas || []).filter(conta => conta.cliente_id === cliente.id)
+      const saldoDevido = contasDoCliente.reduce(
+        (total, conta) => total + (Number(conta.valor_total) - Number(conta.valor_pago)),
+        0
+      )
+      return { ...cliente, saldoDevido }
+    })
+  }, [])
+
+  const carregarClientes = useCallback(async () => {
     setCarregando(true)
     try {
-      const { data: listaClientes, error: errC } = await supabase.from('clientes').select('*').order('nome')
-      if (errC) throw errC
-
-      const { data: contas, error: errConta } = await supabase.from('fiado_contas').select('*').neq('status', 'pago')
-      if (errConta) throw errConta
-
-      const clientesComSaldo = (listaClientes || []).map(cli => {
-        const contasDoCli = (contas || []).filter(c => c.cliente_id === cli.id)
-        const saldoDevido = contasDoCli.reduce((acc, c) => acc + (Number(c.valor_total) - Number(c.valor_pago)), 0)
-        return { ...cli, saldoDevido }
-      })
-
-      setClientes(clientesComSaldo)
-
-      if (clienteSelecionado) {
-        const atualizado = clientesComSaldo.find(c => c.id === clienteSelecionado.id)
-        if (atualizado) setClienteSelecionado(atualizado)
-      }
-    } catch (err) {
-      console.error("Erro ao carregar clientes:", err)
+      const clientesCarregados = await buscarClientes()
+      setClientes(clientesCarregados)
+      setClienteSelecionado((atual) => (
+        atual ? clientesCarregados.find(cliente => cliente.id === atual.id) || atual : atual
+      ))
+    } catch (error) {
+      console.error('Erro ao carregar clientes:', error)
+      alert('Erro ao carregar clientes: ' + error.message)
     } finally {
       setCarregando(false)
     }
-  }
+  }, [buscarClientes])
 
   // ==========================================
   // 2. CARREGAR EXTRATO DA FICHA
   // ==========================================
-  const carregarFichaCliente = async (clienteId) => {
-    try {
-      const [resContas, resPagamentos] = await Promise.all([
-        supabase.from('fiado_contas').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false }),
-        supabase.from('fiado_pagamentos').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false })
-      ])
-
-      setExtratoContas(resContas.data || [])
-      setExtratoPagamentos(resPagamentos.data || [])
-    } catch (err) {
-      console.error("Erro ao carregar ficha do cliente:", err)
+  const buscarFichaCliente = useCallback(async (clienteId) => {
+    const [resContas, resPagamentos] = await Promise.all([
+      supabase.from('fiado_contas').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false }),
+      supabase.from('fiado_pagamentos').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false })
+    ])
+    if (resContas.error) throw resContas.error
+    if (resPagamentos.error) throw resPagamentos.error
+    return {
+      contas: resContas.data || [],
+      pagamentos: resPagamentos.data || [],
     }
-  }
+  }, [])
+
+  const carregarFichaCliente = useCallback(async (clienteId) => {
+    try {
+      const ficha = await buscarFichaCliente(clienteId)
+      setExtratoContas(ficha.contas)
+      setExtratoPagamentos(ficha.pagamentos)
+    } catch (error) {
+      console.error('Erro ao carregar ficha do cliente:', error)
+      alert('Erro ao carregar ficha: ' + error.message)
+    }
+  }, [buscarFichaCliente])
+
+  useEffect(() => {
+    let active = true
+    buscarClientes()
+      .then((clientesCarregados) => {
+        if (!active) return
+        setClientes(clientesCarregados)
+        setClienteSelecionado((atual) => (
+          atual ? clientesCarregados.find(cliente => cliente.id === atual.id) || atual : atual
+        ))
+      })
+      .catch((error) => {
+        console.error('Erro ao carregar clientes:', error)
+      })
+      .finally(() => {
+        if (active) setCarregando(false)
+      })
+    return () => { active = false }
+  }, [buscarClientes])
+
+  useEffect(() => {
+    if (!clienteSelecionado) return undefined
+    let active = true
+    buscarFichaCliente(clienteSelecionado.id)
+      .then((ficha) => {
+        if (!active) return
+        setExtratoContas(ficha.contas)
+        setExtratoPagamentos(ficha.pagamentos)
+      })
+      .catch((error) => {
+        console.error('Erro ao carregar ficha do cliente:', error)
+      })
+    return () => { active = false }
+  }, [buscarFichaCliente, clienteSelecionado])
 
   // ==========================================
   // 3. CRUD: SALVAR (NOVO/EDITAR) E EXCLUIR CLIENTE
@@ -102,7 +149,8 @@ export default function Fiado() {
         nome: dados.nome.trim(),
         telefone: dados.telefone || '',
         limite_credito: parseFloat(dados.limite_credito) || 0,
-        observacoes: dados.observacoes || ''
+        observacoes: dados.observacoes || '',
+        loja_id: profile.loja_id,
       }
 
       let dataCli;
@@ -146,7 +194,8 @@ export default function Fiado() {
       setClienteSelecionado(null)
       carregarClientes()
     } catch (err) {
-      alert("Erro ao excluir cliente.")
+      console.error("Erro ao excluir cliente:", err)
+      alert("Erro ao excluir cliente: " + err.message)
     }
   }
 
@@ -175,7 +224,8 @@ export default function Fiado() {
       const disponiveis = (vendas || []).filter(v => !idsVinculados.includes(v.id))
       setVendasPdv(disponiveis)
     } catch (err) {
-      alert("Erro ao buscar vendas do PDV.")
+      console.error("Erro ao buscar vendas do PDV:", err)
+      alert("Erro ao buscar vendas do PDV: " + err.message)
     } finally {
       setCarregandoVendas(false)
     }
@@ -187,14 +237,17 @@ export default function Fiado() {
     const itensDesc = venda.vendas_itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ')
 
     try {
-      await supabase.from('fiado_contas').insert([{
+      const { error: erroConta } = await supabase.from('fiado_contas').insert([{
+        loja_id: profile.loja_id,
+        usuario_id: user.id,
         cliente_id: clienteSelecionado.id,
         venda_id: venda.id,
         valor_total: venda.total,
         valor_pago: 0,
-        status: 'pendente',
+        status: 'aberta',
         descricao: `Ficha PDV: ${itensDesc}`
       }])
+      if (erroConta) throw erroConta
 
       // Dispara a notificação de nova dívida
       await dispararNotificacao(
@@ -207,7 +260,8 @@ export default function Fiado() {
       carregarClientes()
       carregarFichaCliente(clienteSelecionado.id)
     } catch (err) {
-      alert("Erro ao vincular venda.")
+      console.error("Erro ao vincular venda:", err)
+      alert("Erro ao vincular venda: " + err.message)
     }
   }
 
@@ -219,25 +273,31 @@ export default function Fiado() {
     if (!valor || valor <= 0) return alert("Informe um valor válido.")
 
     const entrada = parseFloat(novoDebito.valor_pago_inicial) || 0
-    const statusInicial = entrada >= valor ? 'pago' : entrada > 0 ? 'parcial' : 'pendente'
+    const statusInicial = entrada >= valor ? 'paga' : 'aberta'
 
     try {
-      const { data: contaCriada } = await supabase.from('fiado_contas').insert([{
+      const { data: contaCriada, error: erroConta } = await supabase.from('fiado_contas').insert([{
+        loja_id: profile.loja_id,
+        usuario_id: user.id,
         cliente_id: clienteSelecionado.id,
         valor_total: valor,
         valor_pago: entrada,
         status: statusInicial,
         descricao: novoDebito.descricao || 'Compra manual sem descrição'
       }]).select().single()
+      if (erroConta) throw erroConta
 
       if (entrada > 0) {
-        await supabase.from('fiado_pagamentos').insert([{
+        const { error: erroPagamento } = await supabase.from('fiado_pagamentos').insert([{
+          loja_id: profile.loja_id,
+          usuario_id: user.id,
           cliente_id: clienteSelecionado.id,
           fiado_conta_id: contaCriada.id,
           valor: entrada,
           metodo_pagamento: 'dinheiro',
           observacao: 'Entrada na hora da compra'
         }])
+        if (erroPagamento) throw erroPagamento
       }
 
       // Dispara a notificação
@@ -252,7 +312,8 @@ export default function Fiado() {
       carregarClientes()
       carregarFichaCliente(clienteSelecionado.id)
     } catch (err) {
-      alert("Erro ao lançar débito.")
+      console.error("Erro ao lançar débito:", err)
+      alert("Erro ao lançar débito: " + err.message)
     }
   }
 
@@ -269,16 +330,19 @@ export default function Fiado() {
     }
 
     try {
-      await supabase.from('fiado_pagamentos').insert([{
+      const { error: erroPagamento } = await supabase.from('fiado_pagamentos').insert([{
+        loja_id: profile.loja_id,
+        usuario_id: user.id,
         cliente_id: clienteSelecionado.id,
         valor: valorAbater,
         metodo_pagamento: novoPagamento.metodo_pagamento,
         observacao: novoPagamento.observacao || 'Abatimento de dívida'
       }])
+      if (erroPagamento) throw erroPagamento
 
       // Abate em cascata
       const contasPendentes = extratoContas
-        .filter(c => c.status !== 'pago')
+        .filter(c => c.status !== 'paga')
         .sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em))
 
       for (const conta of contasPendentes) {
@@ -287,11 +351,13 @@ export default function Fiado() {
         const saldoConta = Number(conta.valor_total) - Number(conta.valor_pago)
         const abatimento = Math.min(valorAbater, saldoConta)
         const novoValorPago = Number(conta.valor_pago) + abatimento
-        const novoStatus = novoValorPago >= Number(conta.valor_total) ? 'pago' : 'parcial'
+        const novoStatus = novoValorPago >= Number(conta.valor_total) ? 'paga' : 'aberta'
 
-        await supabase.from('fiado_contas')
-          .update({ valor_pago: novoValorPago, status: novoStatus })
+        const { error: erroAtualizacao } = await supabase.from('fiado_contas')
+          .update({ valor_pago: novoValorPago, status: novoStatus, usuario_id: user.id })
           .eq('id', conta.id)
+          .eq('loja_id', profile.loja_id)
+        if (erroAtualizacao) throw erroAtualizacao
 
         valorAbater -= abatimento
       }
@@ -308,7 +374,8 @@ export default function Fiado() {
       carregarClientes()
       carregarFichaCliente(clienteSelecionado.id)
     } catch (err) {
-      alert("Erro ao registrar pagamento.")
+      console.error("Erro ao registrar pagamento:", err)
+      alert("Erro ao registrar pagamento: " + err.message)
     }
   }
 
@@ -508,7 +575,7 @@ export default function Fiado() {
                     return (
                       <div key={c.id} className="p-5 hover:bg-gray-50 transition-colors">
                         <div className="flex justify-between items-start mb-2">
-                          <span className={`text-[10px] font-black px-2 py-1 rounded-md uppercase tracking-wider ${c.status === 'pago' ? 'bg-green-100 text-green-700' : c.status === 'parcial' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700'}`}>
+                          <span className={`text-[10px] font-black px-2 py-1 rounded-md uppercase tracking-wider ${c.status === 'paga' ? 'bg-green-100 text-green-700' : Number(c.valor_pago) > 0 ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700'}`}>
                             {c.status}
                           </span>
                           <span className="text-xs font-bold text-gray-400">

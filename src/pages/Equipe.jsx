@@ -1,256 +1,138 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ShieldCheck, User, UserRoundX, Users } from 'lucide-react'
 import { supabase } from '../services/supabase'
-import { Users, Plus, Trash2, ShieldAlert, User, X, CheckCircle } from 'lucide-react'
+import { useAuth } from '../context/useAuth'
 
 export default function Equipe() {
   const navigate = useNavigate()
-  
+  const { profile } = useAuth()
   const [equipe, setEquipe] = useState([])
   const [carregando, setCarregando] = useState(true)
-  const [modalAberto, setModalAberto] = useState(false)
-  const [processando, setProcessando] = useState(false)
+  const [erro, setErro] = useState('')
 
-  // Form de novo membro
-  const [novoMembro, setNovoMembro] = useState({
-    nome: '',
-    pin: '',
-    cargo: 'funcionario'
-  })
+  const buscarEquipe = useCallback(async () => {
+    if (!profile) return []
+    const { data, error } = await supabase
+      .from('usuarios')
+      .select('id, nome, email, role, ativo, criado_em')
+      .eq('loja_id', profile.loja_id)
+      .order('criado_em', { ascending: true })
+
+    if (error) throw error
+    return data || []
+  }, [profile])
 
   useEffect(() => {
-    carregarEquipe()
-  }, [])
+    let active = true
+    buscarEquipe()
+      .then((members) => {
+        if (active) setEquipe(members)
+      })
+      .catch((error) => {
+        console.error('Erro ao carregar equipe:', error)
+        if (active) setErro('Não foi possível carregar os membros da loja.')
+      })
+      .finally(() => {
+        if (active) setCarregando(false)
+      })
+    return () => { active = false }
+  }, [buscarEquipe])
 
-  const carregarEquipe = async () => {
+  const desativarMembro = async (membro) => {
+    if (membro.role === 'dono') return
+    if (!window.confirm(`Desativar o acesso de ${membro.nome}?`)) return
+
     setCarregando(true)
-    try {
-      const { data, error } = await supabase
-        .from('perfis')
-        .select('*')
-        .order('cargo', { ascending: true }) // Admins primeiro
-        .order('nome', { ascending: true })
+    const { error } = await supabase
+      .from('usuarios')
+      .update({ ativo: false })
+      .eq('id', membro.id)
+      .eq('loja_id', profile.loja_id)
+    if (error) {
+      console.error('Erro ao desativar membro:', error)
+      setErro('Não foi possível desativar esse acesso.')
+      return
+    }
 
-      if (error) throw error
-      setEquipe(data || [])
+    try {
+      setEquipe(await buscarEquipe())
     } catch (error) {
-      console.error("Erro ao carregar equipe:", error)
+      console.error('Erro ao atualizar equipe:', error)
+      setErro('O acesso foi atualizado, mas não foi possível recarregar a equipe.')
     } finally {
       setCarregando(false)
     }
   }
 
-  const handleSalvarMembro = async (e) => {
-    e.preventDefault()
-    
-    if (!novoMembro.nome || !novoMembro.pin) {
-      alert("Preencha o nome e o PIN.")
-      return
-    }
-
-    if (novoMembro.pin.length < 4) {
-      alert("O PIN deve ter pelo menos 4 dígitos.")
-      return
-    }
-
-    setProcessando(true)
-    try {
-      // Pega o ID da loja (temporário até termos o login multi-tenant isolado)
-      const { data: loja } = await supabase.from('lojas').select('id').limit(1).single()
-
-      const { error } = await supabase.from('perfis').insert([{
-        loja_id: loja.id,
-        nome: novoMembro.nome,
-        pin: novoMembro.pin,
-        cargo: novoMembro.cargo
-      }])
-
-      if (error) {
-        if (error.code === '23505') {
-          throw new Error("Este PIN já está sendo usado por outro funcionário nesta loja.")
-        }
-        throw error
-      }
-
-      // Sucesso
-      setModalAberto(false)
-      setNovoMembro({ nome: '', pin: '', cargo: 'funcionario' })
-      carregarEquipe()
-      
-    } catch (error) {
-      alert("Erro ao adicionar membro: " + error.message)
-    } finally {
-      setProcessando(false)
-    }
-  }
-
-  const handleExcluirMembro = async (id, nome) => {
-    if (!confirm(`Tem certeza que deseja excluir o acesso de ${nome}?`)) return
-
-    try {
-      const { error } = await supabase.from('perfis').delete().eq('id', id)
-      if (error) throw error
-      
-      // Atualiza a tela localmente sem precisar recarregar o banco
-      setEquipe(equipe.filter(membro => membro.id !== id))
-    } catch (error) {
-      alert("Erro ao excluir membro: " + error.message)
-    }
+  if (profile?.role !== 'dono') {
+    return (
+      <main className="mx-auto w-full max-w-3xl px-5 py-12">
+        <h1 className="text-2xl font-semibold text-[#191813]">Gestão da equipe</h1>
+        <p className="mt-3 text-sm text-black/55">Esta área está disponível apenas para o proprietário da loja.</p>
+      </main>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5F7] px-4 py-12 animate-in fade-in duration-300">
-      <div className="max-w-4xl mx-auto">
-
-        {/* ==========================================
-            CABEÇALHO
-            ========================================== */}
-        <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
-          <div>
-            <button onClick={() => navigate('/admin-home')} className="text-indigo-600 font-bold mb-2 flex items-center gap-1 hover:underline focus:outline-none">
-              ← Voltar ao Painel
-            </button>
-            <h1 className="text-3xl font-bold text-[#1D1D1F]" style={{ letterSpacing: '-0.02em' }}>
-              Gerenciar Equipe
-            </h1>
-            <p className="text-[#86868B] mt-1 text-sm">Controle de acessos e PINs do caixa.</p>
-          </div>
-          
-          <button 
-            onClick={() => setModalAberto(true)}
-            className="bg-[#1D1D1F] hover:bg-black text-white font-bold px-6 py-3 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
-          >
-            <Plus size={18} /> Adicionar Membro
-          </button>
-        </header>
-
-        {/* ==========================================
-            LISTA DE EQUIPE
-            ========================================== */}
-        {carregando ? (
-          <div className="text-center py-20 text-gray-500 font-bold animate-pulse">Carregando acessos...</div>
-        ) : equipe.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-gray-200">
-            <Users size={48} className="mx-auto text-gray-300 mb-4" />
-            <p className="text-gray-500 font-medium">Nenhum membro cadastrado.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {equipe.map(membro => (
-              <div key={membro.id} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between group transition-all hover:shadow-md">
-                <div className="flex justify-between items-start mb-4">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold ${membro.cargo === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                    {membro.nome.charAt(0).toUpperCase()}
-                  </div>
-                  <button 
-                    onClick={() => handleExcluirMembro(membro.id, membro.nome)}
-                    className="text-gray-300 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                    title="Excluir acesso"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-                
-                <div>
-                  <h3 className="font-bold text-[#1D1D1F] text-lg truncate">{membro.nome}</h3>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-1 rounded-md tracking-widest border border-gray-200">
-                      PIN: {membro.pin}
-                    </span>
-                    {membro.cargo === 'admin' ? (
-                      <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-1 rounded-md flex items-center gap-1">
-                        <ShieldAlert size={12} /> Admin
-                      </span>
-                    ) : (
-                      <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-md flex items-center gap-1">
-                        <User size={12} /> Vendedor
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-      </div>
-
-      {/* ==========================================
-          MODAL: NOVO MEMBRO
-          ========================================== */}
-      {modalAberto && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
-            <header className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h2 className="font-bold text-[#1D1D1F] text-xl">Novo Acesso</h2>
-              <button onClick={() => setModalAberto(false)} className="text-gray-400 hover:text-gray-800 bg-white rounded-full p-1 shadow-sm border border-gray-200">
-                <X size={20} />
-              </button>
-            </header>
-
-            <form onSubmit={handleSalvarMembro} className="p-6 flex flex-col gap-5">
-              
-              <div>
-                <label className="block text-xs font-bold text-[#86868B] uppercase tracking-wide mb-1.5 ml-1">Nome do Funcionário</label>
-                <input 
-                  type="text" 
-                  autoFocus
-                  placeholder="Ex: Ana Silva"
-                  value={novoMembro.nome}
-                  onChange={e => setNovoMembro({...novoMembro, nome: e.target.value})}
-                  className="w-full bg-[#F5F5F7] border border-transparent focus:border-indigo-500 focus:bg-white rounded-xl p-4 text-[#1D1D1F] outline-none transition-all"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#86868B] uppercase tracking-wide mb-1.5 ml-1">Senha (PIN)</label>
-                <input 
-                  type="text" 
-                  inputMode="numeric"
-                  placeholder="Ex: 1234"
-                  maxLength={6}
-                  value={novoMembro.pin}
-                  onChange={e => setNovoMembro({...novoMembro, pin: e.target.value.replace(/\D/g, '')})} // Força apenas números
-                  className="w-full bg-[#F5F5F7] border border-transparent focus:border-indigo-500 focus:bg-white rounded-xl p-4 text-[#1D1D1F] outline-none transition-all font-mono tracking-widest text-lg"
-                />
-                <p className="text-xs text-gray-400 mt-1 ml-1">Apenas números (mínimo 4 dígitos).</p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#86868B] uppercase tracking-wide mb-1.5 ml-1">Nível de Acesso</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button 
-                    type="button"
-                    onClick={() => setNovoMembro({...novoMembro, cargo: 'funcionario'})}
-                    className={`p-3 rounded-xl font-bold text-sm transition-all border-2 flex items-center justify-center gap-2 ${novoMembro.cargo === 'funcionario' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-transparent bg-[#F5F5F7] text-gray-500 hover:bg-gray-200'}`}
-                  >
-                    Vendedor
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setNovoMembro({...novoMembro, cargo: 'admin'})}
-                    className={`p-3 rounded-xl font-bold text-sm transition-all border-2 flex items-center justify-center gap-2 ${novoMembro.cargo === 'admin' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-transparent bg-[#F5F5F7] text-gray-500 hover:bg-gray-200'}`}
-                  >
-                    Admin
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <button 
-                  type="submit" 
-                  disabled={processando}
-                  className={`w-full text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all ${processando ? 'bg-gray-400' : 'bg-indigo-600 hover:bg-indigo-700 shadow-md'}`}
-                >
-                  {processando ? 'Salvando...' : <><CheckCircle size={18} /> Cadastrar</>}
-                </button>
-              </div>
-
-            </form>
-          </div>
+    <main className="mx-auto w-full max-w-4xl px-5 py-10 sm:px-8">
+      <button onClick={() => navigate('/admin-home')} className="mb-5 text-sm font-medium text-[#866600] hover:underline">
+        ← Voltar ao painel
+      </button>
+      <header className="flex items-center gap-4">
+        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#fff1b3] text-[#866600]">
+          <Users size={22} />
+        </span>
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight text-[#191813]">Equipe da loja</h1>
+          <p className="mt-1 text-sm text-black/55">Acesso identificado pela conta Google de cada pessoa.</p>
         </div>
-      )}
+      </header>
 
-    </div>
+      <aside className="mt-7 rounded-2xl border border-[#e7d89e] bg-[#fff9df] p-4 text-sm leading-6 text-[#645522]">
+        A criação e o envio de convites de funcionários serão habilitados na etapa de onboarding. Não existe mais acesso por PIN.
+      </aside>
+
+      {erro && <p role="alert" className="mt-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{erro}</p>}
+
+      <section className="mt-6 overflow-hidden rounded-3xl border border-black/[0.07] bg-white">
+        {carregando ? (
+          <p className="p-8 text-sm text-black/50">Carregando equipe...</p>
+        ) : equipe.length === 0 ? (
+          <p className="p-8 text-sm text-black/50">Nenhum perfil foi encontrado nesta loja.</p>
+        ) : (
+          <ul className="divide-y divide-black/[0.06]">
+            {equipe.map((membro) => (
+              <li key={membro.id} className="flex items-center justify-between gap-4 p-5 sm:px-6">
+                <div className="flex min-w-0 items-center gap-4">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f2f0e9] text-black/55">
+                    {membro.role === 'dono' ? <ShieldCheck size={18} /> : <User size={18} />}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-[#191813]">{membro.nome}</p>
+                    <p className="truncate text-sm text-black/50">{membro.email || 'E-mail não informado'}</p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className={`rounded-full px-3 py-1 text-xs font-medium ${membro.ativo ? 'bg-emerald-50 text-emerald-700' : 'bg-black/5 text-black/45'}`}>
+                    {membro.role === 'dono' ? 'Proprietário' : membro.ativo ? 'Funcionário' : 'Desativado'}
+                  </span>
+                  {membro.role !== 'dono' && membro.ativo && (
+                    <button
+                      type="button"
+                      onClick={() => desativarMembro(membro)}
+                      title={`Desativar acesso de ${membro.nome}`}
+                      className="rounded-full p-2 text-black/35 transition hover:bg-rose-50 hover:text-rose-600"
+                    >
+                      <UserRoundX size={17} />
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </main>
   )
 }

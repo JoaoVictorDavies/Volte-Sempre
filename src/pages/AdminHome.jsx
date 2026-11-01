@@ -70,7 +70,7 @@ export default function AdminHome() {
         {/* Header */}
         <header className="mb-12 px-2">
           <p className="text-xs font-semibold tracking-widest text-[#86868B] uppercase mb-2">
-            VOLTE · Administração
+            VOLTE!SEMPRE · Administração
           </p>
           <h1
             className="text-4xl font-bold text-[#1D1D1F] leading-tight"
@@ -79,7 +79,7 @@ export default function AdminHome() {
             Painel do Administrador
           </h1>
           <p className="text-[#86868B] mt-2 text-base">
-            Gestão geral da sua unidade VOLTE
+            Gestão geral da sua loja Volte!Sempre
           </p>
         </header>
 
@@ -278,7 +278,7 @@ export default function AdminHome() {
                   Gerenciar Equipe
                 </h3>
                 <p className="text-[#86868B] mt-2 text-sm leading-relaxed">
-                  Crie acessos rápidos (PIN) para os caixas e gerencie os funcionários da loja.
+                  Consulte os perfis da loja e acompanhe os acessos identificados por conta Google.
                 </p>
               </div>
               <div className="mt-6 flex items-center text-indigo-500 text-sm font-medium gap-1 transition-all duration-300 group-hover:gap-2">

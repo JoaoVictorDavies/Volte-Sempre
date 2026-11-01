@@ -47,7 +47,7 @@ export default function InstalacaoBanner() {
           <Download size={22} />
         </div>
         <div>
-          <h4 className="font-bold text-base leading-tight">Instalar App VOLTE</h4>
+          <h4 className="font-bold text-base leading-tight">Instalar Volte!Sempre</h4>
           <p className="text-xs text-gray-400 mt-0.5">Acesse em tela cheia sem barras de navegação.</p>
         </div>
       </div>

@@ -1,26 +1,17 @@
-<svg
-  width="512"
-  height="512"
-  viewBox="0 0 512 512"
-  xmlns="http://www.w3.org/2000/svg"
->
-  <!-- Fundo -->
-  <rect
-    x="36"
-    y="36"
-    width="440"
-    height="440"
-    rx="110"
-    fill="#3b4e32"
-  />
-
-  <!-- V -->
-  <path
-    d="M140 180 L256 350 L372 180"
-    stroke="#d59a30"
-    stroke-width="34"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    fill="none"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="yellowBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFD60A" />
+      <stop offset="100%" stop-color="#FF9F0A" />
+    </linearGradient>
+    <filter id="premiumShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#B45309" flood-opacity="0.3" />
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="115" fill="url(#yellowBg)" />
+  <g stroke="#FFFFFF" stroke-width="44" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#premiumShadow)">
+    <path d="M 100 160 L 178 330 L 256 160 L 256 275" />
+    <path d="M 256 345 L 256 345.01" />
+    <path d="M 412 180 C 382 130, 312 170, 362 255 C 412 340, 342 380, 312 330" />
+  </g>
 </svg>

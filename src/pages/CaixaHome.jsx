@@ -1,113 +1,89 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
-import { Lock, Unlock, LogOut, ShieldAlert, ArrowRight, Printer, BookOpen } from 'lucide-react'
+import { Lock, Unlock, ShieldAlert, Printer, BookOpen } from 'lucide-react'
 import ThermalPrinterEncoder from 'thermal-printer-encoder'
-import { dispararNotificacao } from '../services/notificacoes' // ← Importação da Notificação
+import { dispararNotificacao } from '../services/notificacoes'
+import { useAuth } from '../context/useAuth'
 
 export default function CaixaHome() {
   const navigate = useNavigate()
-  
-  const [pin, setPin] = useState('')
+  const { user, profile } = useAuth()
   const [carregando, setCarregando] = useState(false)
-  
-  const [usuario, setUsuario] = useState(null)
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
   const [sessoesAdmin, setSessoesAdmin] = useState([])
-  
-  // Estado do Fechamento e Impressora
   const [resumoFechamento, setResumoFechamento] = useState(null)
   const [printerStatus, setPrinterStatus] = useState('Imprimir Relatório')
   const printerCharRef = useRef(null)
 
-  // Limpa o localStorage preventivamente ao montar a tela
   useEffect(() => {
-    localStorage.removeItem('volte_sessao_caixa')
-  }, [])
+    if (!profile || !user) return
 
-  // ==========================================
-  // 1. AUTENTICAÇÃO VIA PIN
-  // ==========================================
-  const acessarComPin = async (e) => {
-    e.preventDefault()
-    if (!pin.trim()) return
-
-    setCarregando(true)
-    try {
-      // Busca o usuário pelo PIN
-      const { data: user, error: userError } = await supabase
-        .from('perfis')
-        .select('*')
-        .eq('pin', pin)
-        .single()
-
-      if (userError || !user) {
-        throw new Error("PIN incorreto ou não encontrado.")
-      }
-
-      setUsuario(user)
-
-      if (user.cargo === 'admin') {
-        // Se for ADMIN: Busca todos os caixas abertos na loja
-        const { data: sessoesAbertas } = await supabase
-          .from('caixa_sessoes')
-          .select('*, perfis(nome)')
-          .eq('status', 'aberto')
-        
-        setSessoesAdmin(sessoesAbertas || [])
-      } else {
-        // Se for FUNCIONÁRIO: Busca se ELE tem um caixa aberto
-        const { data: sessao } = await supabase
+    const carregarSessoes = async () => {
+      setCarregando(true)
+      try {
+        let query = supabase
           .from('caixa_sessoes')
           .select('*')
-          .eq('perfil_id', user.id)
+          .eq('loja_id', profile.loja_id)
           .eq('status', 'aberto')
-          .single()
 
-        if (sessao) {
-          setSessaoAtiva(sessao)
-          // Recupera pro localStorage para o PDV funcionar normalmente
-          localStorage.setItem('volte_sessao_caixa', JSON.stringify(sessao))
+        if (profile.role !== 'dono') {
+          query = query.eq('usuario_id', user.id)
         }
-      }
-    } catch (error) {
-      alert(error.message)
-    } finally {
-      setCarregando(false)
-      setPin('')
-    }
-  }
 
-  // ==========================================
-  // 2. ABRIR NOVO CAIXA
-  // ==========================================
+        const { data, error } = await query.order('aberto_em', { ascending: false })
+        if (error) throw error
+
+        const sessoes = data || []
+        setSessoesAdmin(profile.role === 'dono' ? sessoes : [])
+        const minhaSessao = sessoes.find((sessao) => (
+          sessao.usuario_id === user.id || sessao.perfil_id === user.id
+        ))
+        setSessaoAtiva(minhaSessao || null)
+
+        if (minhaSessao) {
+          localStorage.setItem('volte_sessao_caixa', JSON.stringify(minhaSessao))
+        } else {
+          localStorage.removeItem('volte_sessao_caixa')
+        }
+      } catch (error) {
+        console.error('Erro ao carregar sessões de caixa:', error)
+        alert(`Erro ao carregar sessões de caixa: ${error.message}`)
+      } finally {
+        setCarregando(false)
+      }
+    }
+
+    carregarSessoes()
+  }, [profile, user])
+
   const abrirCaixa = async () => {
+    if (!profile || !user) return
     setCarregando(true)
     try {
       const { data, error } = await supabase
         .from('caixa_sessoes')
         .insert([{ 
-          operador: usuario.nome,
-          perfil_id: usuario.id,
-          loja_id: usuario.loja_id
+          operador: profile.nome,
+          usuario_id: user.id,
+          perfil_id: user.id,
+          loja_id: profile.loja_id,
         }])
         .select()
         .single()
 
       if (error) throw error
 
+      setSessaoAtiva(data)
       localStorage.setItem('volte_sessao_caixa', JSON.stringify(data))
-      
-      // ==========================================
-      // NOTIFICAÇÃO: CAIXA ABERTO
-      // ==========================================
       const horaAbertura = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       dispararNotificacao(
         "🟢 Caixa Aberto", 
-        `Caixa aberto por ${usuario.nome} às ${horaAbertura}. Que Deus abençoe sua jornada de trabalho e traga excelentes vendas! 🙏✨`
+        `Caixa aberto por ${profile.nome} às ${horaAbertura}. Que Deus abençoe sua jornada de trabalho e traga excelentes vendas! 🙏✨`
       );
 
-      navigate('/pdv') 
+      navigate('/pdv')
     } catch (error) {
       alert("Erro ao abrir caixa: " + error.message)
     } finally {
@@ -120,14 +96,16 @@ export default function CaixaHome() {
   // ==========================================
   const fecharCaixa = async (sessaoParaFechar) => {
     if (!confirm("Tem certeza que deseja encerrar este caixa?")) return
-    
+    if (!user || !profile) return
     setCarregando(true)
     try {
       // Puxa vendas e troco desta sessão
-      const { data: vendas } = await supabase
+      const { data: vendas, error: erroVendas } = await supabase
         .from('vendas')
         .select('total, metodo_pagamento, troco')
         .eq('sessao_id', sessaoParaFechar.id)
+        .eq('loja_id', profile.loja_id)
+      if (erroVendas) throw erroVendas
 
       const vendasProcessadas = vendas || []
       
@@ -144,11 +122,21 @@ export default function CaixaHome() {
 
       const dataFechamento = new Date().toISOString()
 
-      // Atualiza o banco
-      await supabase
+      const { data: sessaoFechada, error: erroFechamento } = await supabase
         .from('caixa_sessoes')
-        .update({ status: 'fechado', fechado_em: dataFechamento })
+        .update({
+          status: 'fechado',
+          fechado_em: dataFechamento,
+          usuario_id: user.id,
+          fechado_por: user.id,
+        })
         .eq('id', sessaoParaFechar.id)
+        .eq('loja_id', profile.loja_id)
+        .eq('status', 'aberto')
+        .select('id')
+        .maybeSingle()
+      if (erroFechamento) throw erroFechamento
+      if (!sessaoFechada) throw new Error('A sessão já foi encerrada ou não está mais disponível.')
 
       // ==========================================
       // NOTIFICAÇÃO: CAIXA FECHADO
@@ -160,7 +148,9 @@ export default function CaixaHome() {
       );
 
       // Exibe resumo apenas para o funcionário que fechou o próprio caixa
-      if (usuario.cargo !== 'admin') {
+      const sessaoPropria = sessaoParaFechar.usuario_id === user.id
+        || sessaoParaFechar.perfil_id === user.id
+      if (sessaoPropria) {
         setResumoFechamento({
           operador: sessaoParaFechar.operador,
           aberto_em: sessaoParaFechar.aberto_em,
@@ -224,7 +214,9 @@ export default function CaixaHome() {
             const characteristics = await service.getCharacteristics();
             const char = characteristics.find(c => c.properties.write || c.properties.writeWithoutResponse);
             if (char) { targetChar = char; break; }
-          } catch (err) { /* Tenta o próximo */ }
+          } catch {
+            continue
+          }
         }
 
         if (!targetChar) throw new Error("Serviço de impressão não encontrado no aparelho.");
@@ -240,7 +232,7 @@ export default function CaixaHome() {
         .initialize()
         .align('center')
         .bold(true)
-        .line('VOLTE PERFUMARIA')
+        .line('VOLTE!SEMPRE')
         .bold(false)
         .line('--------------------------------')
         .line('FECHAMENTO DE CAIXA')
@@ -366,7 +358,7 @@ export default function CaixaHome() {
             </button>
 
             <button 
-              onClick={() => { setResumoFechamento(null); setUsuario(null); }}
+              onClick={() => { setResumoFechamento(null); navigate('/admin-home'); }}
               className="w-full bg-[#1D1D1F] text-white font-bold py-4 rounded-xl hover:bg-black transition-colors"
             >
               Finalizar e Sair
@@ -377,20 +369,34 @@ export default function CaixaHome() {
     )
   }
 
-  // TELA 2: VISÃO DO ADMINISTRADOR
-  if (usuario && usuario.cargo === 'admin') {
+  if (profile?.role === 'dono') {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center py-20 px-4 animate-in fade-in">
         <div className="w-full max-w-xl">
           <div className="flex justify-between items-center mb-8">
             <div>
-              <h2 className="text-3xl font-bold text-gray-800">Painel de Supervisão</h2>
-              <p className="text-gray-500">Logado como: {usuario.nome}</p>
+              <h2 className="text-3xl font-bold text-gray-800">Caixa da loja</h2>
+              <p className="text-gray-500">Olá, {profile.nome}. Acesso de proprietário.</p>
             </div>
-            <button onClick={() => setUsuario(null)} className="text-gray-500 hover:text-red-500 font-bold p-3 bg-white rounded-xl shadow-sm">
-              <LogOut size={20} />
-            </button>
           </div>
+
+          {!sessaoAtiva && (
+            <button
+              onClick={abrirCaixa}
+              disabled={carregando}
+              className="mb-6 w-full rounded-2xl bg-[#1D1D1F] py-4 font-bold text-white shadow-xl transition hover:bg-black disabled:opacity-50"
+            >
+              {carregando ? 'Abrindo...' : 'Abrir meu caixa'}
+            </button>
+          )}
+          {sessaoAtiva && (
+            <button
+              onClick={() => navigate('/pdv')}
+              className="mb-6 w-full rounded-2xl bg-[#1D1D1F] py-4 font-bold text-white shadow-xl transition hover:bg-black"
+            >
+              Retomar meu caixa
+            </button>
+          )}
 
           <div className="bg-white rounded-3xl shadow-sm p-6 border border-gray-100">
             <h3 className="font-bold text-gray-700 mb-6 flex items-center gap-2">
@@ -425,16 +431,15 @@ export default function CaixaHome() {
     )
   }
 
-  // TELA 3: VISÃO DO FUNCIONÁRIO (Logado)
-  if (usuario && usuario.cargo !== 'admin') {
+  if (profile) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center justify-center p-4 animate-in fade-in">
         <div className="w-full max-w-sm flex flex-col items-center">
           
           <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6 shadow-sm">
-            <span className="text-3xl font-bold">{usuario.nome.charAt(0)}</span>
+            <span className="text-3xl font-bold">{profile.nome.charAt(0)}</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-1">Olá, {usuario.nome}</h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-1">Olá, {profile.nome}</h2>
           
           {sessaoAtiva ? (
             <div className="bg-green-50 border border-green-200 text-green-800 px-6 py-2 rounded-full font-bold mb-8 flex items-center gap-2 shadow-sm">
@@ -467,46 +472,15 @@ export default function CaixaHome() {
               </button>
             )}
             
-            <button onClick={() => setUsuario(null)} className="text-gray-400 font-bold py-3 mt-2 hover:text-gray-800 transition-colors">
-              Sair
-            </button>
           </div>
         </div>
       </div>
     )
   }
 
-  // TELA 4: LOGIN INICIAL (Input do PIN)
   return (
     <div className="min-h-screen bg-[#F5F5F7] flex flex-col items-center justify-center p-4 animate-in fade-in">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-black text-[#1D1D1F] tracking-tight mb-2">Ponto de Venda</h1>
-          <p className="text-[#86868B] font-medium">Insira seu PIN para acessar.</p>
-        </div>
-        
-        <form onSubmit={acessarComPin} className="bg-white p-8 rounded-3xl shadow-lg border border-gray-100">
-          <div className="relative mb-6">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input 
-              type="password" 
-              inputMode="numeric"
-              placeholder="Ex: 1111" 
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              className="w-full border-2 border-gray-100 bg-gray-50 p-4 pl-12 rounded-2xl focus:outline-none focus:bg-white focus:border-blue-500 text-2xl font-mono tracking-widest text-center transition-all"
-              autoFocus
-            />
-          </div>
-          <button 
-            type="submit" 
-            disabled={carregando}
-            className={`w-full flex items-center justify-center gap-2 font-bold py-4 rounded-2xl transition-all text-white shadow-md ${carregando ? 'bg-blue-400' : 'bg-blue-600 hover:bg-blue-700 hover:scale-[1.02]'}`}
-          >
-            {carregando ? 'Verificando...' : <>Acessar <ArrowRight size={18}/></>}
-          </button>
-        </form>
-      </div>
+      <p className="font-semibold text-[#1D1D1F]">Carregando seu perfil...</p>
     </div>
   )
 }

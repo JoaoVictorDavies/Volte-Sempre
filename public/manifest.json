@@ -1,10 +1,10 @@
 {
-  "name": "VOLTE | Perfumaria",
-  "short_name": "VOLTE",
+  "name": "Volte!Sempre",
+  "short_name": "Volte!Sempre",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2563eb",
+  "background_color": "#11100e",
+  "theme_color": "#11100e",
   "icons": [
     {
       "src": "/favicon.svg",

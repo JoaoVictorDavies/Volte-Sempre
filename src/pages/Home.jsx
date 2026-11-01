@@ -1,177 +1,189 @@
-import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { Sparkles, Layers, ShieldCheck, ArrowRight } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowDownRight, ArrowRight, BarChart3, CreditCard, PackageCheck, ShieldCheck, Sparkles, Store } from 'lucide-react'
+import BrandLogo from '../components/BrandLogo'
+import AppByVolte from '../components/AppByVolte'
+import { useAuth } from '../context/useAuth'
 
-const fadeUp = (delay = 0) => ({
-  initial: { opacity: 0, y: 24 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94], delay },
-})
-
-const features = [
-  { icon: Layers, label: 'Sistema Para Todos' },
-  { icon: ShieldCheck, label: 'Seguro e Protegido' },
-  { icon: Sparkles, label: 'Experiência Fácil' },
+const modules = [
+  {
+    icon: Store,
+    number: '01',
+    title: 'Ponto de Venda Rápido',
+    description: 'Um caixa simples e ágil para atender melhor, registrar cada venda e manter a operação fluindo.',
+  },
+  {
+    icon: CreditCard,
+    number: '02',
+    title: 'Fiado Digital',
+    description: 'Contas, pagamentos e histórico de clientes organizados em um só lugar, sem perder nenhum detalhe.',
+  },
+  {
+    icon: PackageCheck,
+    number: '03',
+    title: 'Estoque Inteligente',
+    description: 'Acompanhe produtos e lotes com clareza para saber o que vende e o que precisa de reposição.',
+  },
 ]
-
-const dailyPalettes = [
-  // Domingo — solar
-  ['#FBBF24', '#FB7185', '#F97316'],
-  // Segunda — índigo e violeta
-  ['#6366F1', '#8B5CF6', '#A855F7'],
-  // Terça — esmeralda e teal
-  ['#10B981', '#14B8A6', '#34D399'],
-  // Quarta — oceano
-  ['#0EA5E9', '#2563EB', '#38BDF8'],
-  // Quinta — rosa e roxo
-  ['#EC4899', '#A855F7', '#F472B6'],
-  // Sexta — âmbar e sunset
-  ['#F59E0B', '#F97316', '#EF4444'],
-  // Sábado — ciano e azul profundo
-  ['#22D3EE', '#3B82F6', '#1E40AF'],
-]
-
-const blobTransition = (duration, delay = 0) => ({
-  duration,
-  delay,
-  repeat: Infinity,
-  ease: 'easeInOut',
-})
 
 export default function Home() {
-  const palette = dailyPalettes[new Date().getDay()]
+  const { signInWithGoogle } = useAuth()
+  const [erro, setErro] = useState('')
+  const [entrando, setEntrando] = useState(false)
+
+  const entrarComGoogle = async () => {
+    setErro('')
+    setEntrando(true)
+    try {
+      await signInWithGoogle()
+    } catch (error) {
+      console.error('Erro ao iniciar login com Google:', error)
+      setErro('Não foi possível iniciar o login. Tente novamente em instantes.')
+      setEntrando(false)
+    }
+  }
 
   return (
-    <div className="relative flex flex-col items-center justify-center min-h-screen px-4 text-center overflow-hidden bg-[#F5F5F7]">
-      {/* Daily Animated Mesh Gradient */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        <motion.div
-          className="absolute -top-32 -left-32 w-[34rem] h-[34rem] rounded-full blur-3xl opacity-50"
-          style={{ backgroundColor: palette[0], willChange: 'transform' }}
-          animate={{
-            x: [0, 30, -20, 0],
-            y: [0, -40, 20, 0],
-            scale: [1, 1.1, 0.95, 1],
-          }}
-          transition={blobTransition(18)}
-        />
-
-        <motion.div
-          className="absolute top-[20%] -right-40 w-[38rem] h-[38rem] rounded-full blur-3xl opacity-50"
-          style={{ backgroundColor: palette[1], willChange: 'transform' }}
-          animate={{
-            x: [0, -45, 25, 0],
-            y: [0, 35, -30, 0],
-            scale: [1, 0.92, 1.08, 1],
-          }}
-          transition={blobTransition(22, 1)}
-        />
-
-        <motion.div
-          className="absolute -bottom-48 left-[18%] w-[36rem] h-[36rem] rounded-full blur-3xl opacity-50"
-          style={{ backgroundColor: palette[2], willChange: 'transform' }}
-          animate={{
-            x: [0, 40, -35, 0],
-            y: [0, -25, 35, 0],
-            scale: [1, 1.08, 0.94, 1],
-          }}
-          transition={blobTransition(20, 2)}
-        />
-      </div>
-
-      <div className="relative z-10 flex flex-col items-center max-w-lg w-full">
-        {/* Eyebrow pill */}
-        <motion.div {...fadeUp(0)}>
-          <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold tracking-widest uppercase bg-white/70 backdrop-blur-md text-[#86868B] shadow-sm border border-white/60">
-            <Sparkles className="text-indigo-400" size={12} strokeWidth={1.8} />
-            Sistema Completo
-          </span>
-        </motion.div>
-
-        {/* Logo / Título */}
-        <motion.h1
-          {...fadeUp(0.1)}
-          className="mt-6 font-bold text-[#1D1D1F]"
-          style={{
-            fontSize: 'clamp(2.4rem, 6vw, 3.8rem)',
-            letterSpacing: '-0.03em',
-            lineHeight: 1.05,
-          }}
+    <main className="min-h-screen overflow-hidden bg-[#11100e] text-[#f8f6ef]">
+      <header className="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8">
+        <a href="/" className="flex items-center gap-3" aria-label="Volte!Sempre, início">
+          <BrandLogo className="h-10 w-10" />
+          <span className="text-sm font-semibold tracking-tight sm:text-base">Volte!Sempre</span>
+        </a>
+        <button
+          type="button"
+          onClick={entrarComGoogle}
+          disabled={entrando}
+          className="rounded-full border border-white/15 px-4 py-2 text-xs font-medium text-white/75 transition hover:border-[#ffd60a]/60 hover:text-white disabled:opacity-50 sm:px-5 sm:text-sm"
         >
-          VOLTE
-          <span className="text-[#86868B] font-light"> | Sempre </span>
-        </motion.h1>
+          {entrando ? 'Conectando...' : 'Fazer login'}
+        </button>
+      </header>
 
-        {/* Subtítulo */}
-        <motion.p
-          {...fadeUp(0.2)}
-          className="mt-4 text-[#1D1D1F] font-semibold"
-          style={{
-            fontSize: 'clamp(1.1rem, 3vw, 1.35rem)',
-            letterSpacing: '-0.01em',
-          }}
-        >
-          Bem-vindo ao sistema VOLTE
-        </motion.p>
+      <section className="relative mx-auto grid min-h-[calc(100svh-80px)] w-full max-w-7xl items-center gap-14 px-5 pb-20 pt-10 sm:px-8 lg:grid-cols-[1.05fr_.95fr] lg:gap-8 lg:pb-28 lg:pt-4">
+        <div className="pointer-events-none absolute -right-36 top-8 h-[32rem] w-[32rem] rounded-full bg-[#ffb800]/[0.09] blur-[120px]" />
+        <div className="relative z-10 max-w-2xl">
+          <p className="inline-flex items-center gap-2 rounded-full border border-[#ffd60a]/20 bg-[#ffd60a]/[0.07] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#ffdb4d]">
+            <Sparkles size={14} /> Gestão leve. Decisões melhores.
+          </p>
+          <h1 className="mt-7 max-w-xl text-5xl font-semibold leading-[1.02] tracking-[-0.06em] sm:text-6xl lg:text-7xl">
+            Sua loja em
+            <span className="block text-[#ffd60a]">outro ritmo.</span>
+          </h1>
+          <p className="mt-6 max-w-lg text-base leading-7 text-white/60 sm:text-lg sm:leading-8">
+            O essencial para vender, acompanhar o estoque e cuidar das contas da sua loja — com tudo conectado em uma experiência simples.
+          </p>
 
-        <motion.p
-          {...fadeUp(0.25)}
-          className="mt-2 text-[#86868B] text-base leading-relaxed max-w-sm"
-        >
-          O coração da sua operação, integração de processos e experiência premium — tudo em um só lugar.
-        </motion.p>
-
-        {/* Feature pills */}
-        <motion.div
-          {...fadeUp(0.35)}
-          className="mt-8 flex flex-wrap items-center justify-center gap-3"
-        >
-          {features.map(({ icon: Icon, label }) => (
-            <div
-              key={label}
-              className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-white/70 backdrop-blur-md shadow-sm border border-white/60 text-sm text-[#1D1D1F] font-medium"
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={entrarComGoogle}
+              disabled={entrando}
+              className="group inline-flex items-center justify-center gap-3 rounded-full bg-[#ffd60a] px-6 py-4 text-sm font-semibold text-[#17140a] shadow-[0_12px_42px_rgba(255,214,10,0.12)] transition hover:bg-[#ffe45c] disabled:cursor-wait disabled:opacity-60"
             >
-              <Icon className="text-indigo-400" size={15} strokeWidth={1.6} />
-              {label}
+              {entrando ? 'Conectando com Google...' : 'Fazer Login / Criar Minha Loja'}
+              {!entrando && <ArrowRight size={17} className="transition-transform group-hover:translate-x-1" />}
+            </button>
+            <a href="#modulos" className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm text-white/60 transition hover:text-white">
+              Conhecer os módulos <ArrowDownRight size={16} />
+            </a>
+          </div>
+          {erro && <p role="alert" className="mt-4 text-sm text-rose-300">{erro}</p>}
+
+          <div className="mt-11 flex items-center gap-3 text-xs text-white/45">
+            <ShieldCheck size={16} className="text-[#ffd60a]" />
+            Acesso seguro com sua conta Google
+          </div>
+        </div>
+
+        <div className="relative mx-auto w-full max-w-lg lg:ml-auto">
+          <div className="absolute -inset-5 rounded-[2.5rem] bg-gradient-to-br from-[#ffd60a]/15 via-transparent to-[#ff9f0a]/5 blur-2xl" />
+          <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#1a1916] p-5 shadow-2xl sm:p-7">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-5">
+              <div>
+                <p className="text-xs text-white/45">Visão da operação</p>
+                <p className="mt-1 text-sm font-medium">Tudo no seu lugar</p>
+              </div>
+              <span className="flex items-center gap-2 rounded-full bg-emerald-400/10 px-3 py-1.5 text-[11px] text-emerald-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Em movimento
+              </span>
             </div>
-          ))}
-        </motion.div>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="rounded-2xl bg-[#24221d] p-4">
+                <div className="flex items-center justify-between text-white/45">
+                  <span className="text-xs">Vendas</span><BarChart3 size={15} />
+                </div>
+                <p className="mt-5 text-2xl font-semibold tracking-tight">No ritmo</p>
+                <p className="mt-1 text-[11px] text-white/40">Acompanhe seu caixa</p>
+              </div>
+              <div className="rounded-2xl bg-[#24221d] p-4">
+                <div className="flex items-center justify-between text-white/45">
+                  <span className="text-xs">Estoque</span><PackageCheck size={15} />
+                </div>
+                <p className="mt-5 text-2xl font-semibold tracking-tight">Em dia</p>
+                <p className="mt-1 text-[11px] text-white/40">Produtos e lotes claros</p>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-4 rounded-2xl border border-[#ffd60a]/15 bg-[#ffd60a]/[0.06] p-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#ffd60a] text-[#17140a]">
+                <CreditCard size={19} />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Fiado sem papelada</p>
+                <p className="mt-1 text-xs text-white/45">Histórico organizado para você e seus clientes.</p>
+              </div>
+            </div>
+            <div className="mt-6 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-white/30">
+              <span>Vender · Organizar · Crescer</span><span>V!S</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
-        {/* CTA Button */}
-        <motion.div {...fadeUp(0.45)} className="mt-10 w-full max-w-xs">
-          <motion.div
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-          >
-            <Link
-              to="/login"
-              aria-label="Entrar no sistema VOLTE"
-              className="group flex items-center justify-center gap-3 w-full px-8 py-4 rounded-2xl bg-[#1D1D1F] text-white font-semibold text-base focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-              style={{
-                letterSpacing: '-0.01em',
-                boxShadow: '0 0 2px rgba(0,0,0,0.10), 0 8px 32px rgba(99,102,241,0.22)',
-              }}
+      <section id="modulos" className="border-t border-white/[0.08] bg-[#f7f5ee] text-[#191813]">
+        <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-24">
+          <div className="max-w-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#9a7410]">Feito para o dia a dia</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-[-0.045em] sm:text-5xl">
+              Menos complicação.
+              <span className="block text-[#8b6a0a]">Mais loja acontecendo.</span>
+            </h2>
+          </div>
+          <div className="mt-11 grid gap-4 md:grid-cols-3">
+            {modules.map(({ icon: Icon, number, title, description }) => (
+              <article key={number} className="rounded-3xl border border-black/[0.07] bg-white p-6 sm:p-7">
+                <div className="flex items-center justify-between">
+                  <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#fff4c2] text-[#8b6a0a]">
+                    <Icon size={20} />
+                  </span>
+                  <span className="text-xs font-medium tracking-[0.15em] text-black/30">{number}</span>
+                </div>
+                <h3 className="mt-8 text-lg font-semibold tracking-tight">{title}</h3>
+                <p className="mt-3 text-sm leading-6 text-black/55">{description}</p>
+              </article>
+            ))}
+          </div>
+          <div className="mt-12 flex flex-col items-center justify-between gap-5 rounded-3xl bg-[#171612] p-7 text-white sm:flex-row sm:p-9">
+            <div>
+              <p className="text-xl font-semibold tracking-tight">Pronto para organizar sua operação?</p>
+              <p className="mt-2 text-sm text-white/55">Entre com Google e conheça o Volte!Sempre.</p>
+            </div>
+            <button
+              type="button"
+              onClick={entrarComGoogle}
+              disabled={entrando}
+              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-[#ffd60a] px-5 py-3 text-sm font-semibold text-[#17140a] transition hover:bg-[#ffe45c] disabled:opacity-60"
             >
-              Entrar no sistema
-              <ArrowRight
-                className="transition-transform duration-300 group-hover:translate-x-1"
-                size={18}
-                strokeWidth={2}
-              />
-            </Link>
-          </motion.div>
-        </motion.div>
+              {entrando ? 'Conectando...' : 'Fazer Login / Criar Minha Loja'}
+              {!entrando && <ArrowRight size={16} />}
+            </button>
+          </div>
+        </div>
+      </section>
 
-        {/* Bênção — toque humano */}
-        <motion.p
-          {...fadeUp(0.55)}
-          className="mt-10 text-sm text-[#86868B]/60 italic"
-          style={{ letterSpacing: '0.01em' }}
-        >
-          "Deus abençoe a sua jornada de trabalho"
-        </motion.p>
-      </div>
-    </div>
+      <footer className="flex flex-col items-center justify-between gap-3 px-5 py-6 text-xs text-white/40 sm:flex-row sm:px-8">
+        <span>© {new Date().getFullYear()} Volte!Sempre</span>
+        <span className="[&_span]:text-white/50 [&_svg]:h-5 [&_svg]:w-5"><AppByVolte /></span>
+      </footer>
+    </main>
   )
 }
