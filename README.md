@@ -13,8 +13,11 @@ Aplicação SaaS de ponto de venda construída com React, Vite e Supabase.
    VITE_ONESIGNAL_APP_ID=SEU_APP_ID
    ```
 
-3. Configure `http://localhost:5173/auth/callback` como URL de redirecionamento permitida no Supabase Auth.
-4. Inicie o Vite com `npm run dev`.
+3. No Supabase, configure **Authentication > URL Configuration**:
+   - Use como **Site URL** a origem exata onde o Vite está aberto. Por padrão, `npm run dev` usa `http://localhost:5173`; se o terminal informar `http://localhost:3000`, use essa origem.
+   - Adicione `http://localhost:5173/auth/callback` às **Redirect URLs**. Se estiver usando a porta 3000, adicione também `http://localhost:3000/auth/callback`.
+4. Em **Authentication > Providers > Google**, o URI de redirecionamento autorizado no Google Cloud deve ser o callback do projeto Supabase (`https://<project-ref>.supabase.co/auth/v1/callback`), não o endereço local do frontend.
+5. Inicie o Vite com `npm run dev` e abra a mesma origem durante todo o fluxo OAuth. Não misture `localhost` com `127.0.0.1`, nem alterne entre portas.
 
 O login da aplicação usa exclusivamente o provedor Google do Supabase. O `AuthProvider` carrega o perfil em `public.usuarios`; as rotas do PDV exigem uma sessão autenticada e um perfil de loja ativo. As políticas RLS continuam sendo a proteção de dados e não devem ser substituídas pela proteção de rotas do frontend.
 

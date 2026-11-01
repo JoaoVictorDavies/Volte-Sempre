@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowDownRight, ArrowRight, BarChart3, CreditCard, PackageCheck, ShieldCheck, Sparkles, Store } from 'lucide-react'
 import BrandLogo from '../components/BrandLogo'
 import AppByVolte from '../components/AppByVolte'
@@ -25,10 +25,35 @@ const modules = [
   },
 ]
 
+function getOAuthErrorMessage(errorCode) {
+  return errorCode === 'bad_oauth_state'
+    ? 'Não foi possível validar esta tentativa de login. Tente novamente; se persistir, confira as URLs de autenticação no Supabase e use o mesmo endereço da aplicação durante todo o login.'
+    : 'Não foi possível concluir o login com Google. Tente novamente.'
+}
+
 export default function Home() {
   const { signInWithGoogle } = useAuth()
-  const [erro, setErro] = useState('')
+  const [erro, setErro] = useState(() => {
+    const url = new URL(window.location.href)
+    return url.searchParams.has('error')
+      ? getOAuthErrorMessage(url.searchParams.get('error_code'))
+      : ''
+  })
   const [entrando, setEntrando] = useState(false)
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('error')) return
+
+    url.searchParams.delete('error')
+    url.searchParams.delete('error_code')
+    url.searchParams.delete('error_description')
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    )
+  }, [])
 
   const entrarComGoogle = async () => {
     setErro('')
