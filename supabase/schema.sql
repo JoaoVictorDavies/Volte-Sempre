@@ -156,6 +156,7 @@ create table if not exists public.vendas (
   metodo_pagamento text not null,
   valor_recebido numeric(12,2) check (valor_recebido is null or valor_recebido >= 0),
   troco numeric(12,2) not null default 0 check (troco >= 0),
+  pagamentos jsonb not null default '[]'::jsonb,
   status text not null default 'concluida'
     check (status in ('concluida', 'cancelada')),
   criado_em timestamptz not null default now(),

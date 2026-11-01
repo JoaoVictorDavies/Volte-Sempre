@@ -4,8 +4,8 @@ import { supabase } from '../services/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, ArrowRight, CheckCircle, Tag, FileText, Barcode, DollarSign, Hash, ChevronRight, PackagePlus, Camera, Check, X } from 'lucide-react'
 import LeitorCamera from '../components/LeitorCamera'
-
-let slideDirection = 1
+import { useAuth } from '../context/useAuth'
+import { callIdempotentRpc } from '../services/idempotentRpc'
 
 const stepVariants = {
   initial: (dir) => ({ x: dir * 50, opacity: 0 }),
@@ -122,9 +122,11 @@ function StyledInput({ icon: Icon, label, ...props }) {
 
 export default function CadastroProduto() {
   const navigate = useNavigate()
+  const { profile } = useAuth()
 
   // Controle de Fluxo
   const [etapa, setEtapa] = useState(1)
+  const [slideDirection, setSlideDirection] = useState(1)
   const [isLoteMode, setIsLoteMode] = useState(false)
   const [totalEtapas, setTotalEtapas] = useState(5)
 
@@ -157,25 +159,36 @@ export default function CadastroProduto() {
     : (dados.nome.trim() !== '' && dados.estoque !== '' && dados.precoCusto !== '' && dados.precoVenda !== '');
 
   useEffect(() => {
+    if (!profile) return
     async function buscarSetores() {
-      const { data } = await supabase.from('setores').select('*').order('nome')
+      const { data, error } = await supabase.from('setores')
+        .select('*').eq('loja_id', profile.loja_id).order('nome')
+      if (error) {
+        console.error('Erro ao carregar setores:', error)
+        return
+      }
       if (data) setSetoresDoBanco(data)
     }
     buscarSetores()
-  }, [])
+  }, [profile])
 
   useEffect(() => {
-    if (dados.setorId) {
+    if (dados.setorId && profile) {
       async function buscarMarcas() {
-        const { data } = await supabase.from('marcas').select('*').eq('setor_id', dados.setorId).order('nome')
+        const { data, error } = await supabase.from('marcas').select('*')
+          .eq('loja_id', profile.loja_id).eq('setor_id', dados.setorId).order('nome')
+        if (error) {
+          console.error('Erro ao carregar marcas:', error)
+          return
+        }
         if (data) setMarcasDoBanco(data)
       }
       buscarMarcas()
     }
-  }, [dados.setorId])
+  }, [dados.setorId, profile])
 
-  const avancar = () => { slideDirection = 1; setEtapa(e => e + 1) }
-  const voltar = () => { slideDirection = -1; setEtapa(e => e - 1) }
+  const avancar = () => { setSlideDirection(1); setEtapa(e => e + 1) }
+  const voltar = () => { setSlideDirection(-1); setEtapa(e => e - 1) }
 
   const handleBarcodeChange = (e) => {
     const codigo = e.target.value
@@ -189,8 +202,9 @@ export default function CadastroProduto() {
         const { data } = await supabase
           .from('produtos')
           .select('*, marcas(nome, setores(nome)), estoque_lotes(quantidade_atual)')
+          .eq('loja_id', profile.loja_id)
           .eq('codigo_barras', codigo)
-          .single()
+          .maybeSingle()
 
         if (data) {
           const estoqueTotal = data.estoque_lotes 
@@ -226,6 +240,7 @@ export default function CadastroProduto() {
   }
 
   const confirmarCodigoLido = async () => {
+    if (!profile) return
     setCameraAtiva(false)
     setDados(prev => ({ ...prev, codigoBarras: codigoLidoCamera }))
     setBuscando(true)
@@ -238,8 +253,9 @@ export default function CadastroProduto() {
     const { data } = await supabase
       .from('produtos')
       .select('*, marcas(nome, setores(nome)), estoque_lotes(quantidade_atual)')
+      .eq('loja_id', profile.loja_id)
       .eq('codigo_barras', codigoFinal)
-      .single()
+      .maybeSingle()
 
     if (data) {
       const estoqueTotal = data.estoque_lotes 
@@ -271,6 +287,7 @@ export default function CadastroProduto() {
   // LÓGICA DE GERAR CÓDIGO/SKU AUTOMÁTICO
   // ==========================================
   const gerarCodigoUnico = async () => {
+    if (!profile) throw new Error('Perfil da loja não carregado.')
     let isUnique = false;
     let newCode = '';
 
@@ -283,6 +300,7 @@ export default function CadastroProduto() {
       const { data } = await supabase
         .from('produtos')
         .select('id')
+        .eq('loja_id', profile.loja_id)
         .eq('codigo_barras', newCode)
         .maybeSingle();
         
@@ -295,52 +313,30 @@ export default function CadastroProduto() {
   }
 
   async function finalizarCadastro() {
+    if (!profile) {
+      alert('Seu perfil de loja não foi carregado. Atualize a página e tente novamente.')
+      return
+    }
     setCarregando(true)
     try {
-      let produtoId = null
+      let codigoFinal = dados.codigoBarras?.trim()
+      if (!isLoteMode && !codigoFinal) codigoFinal = await gerarCodigoUnico()
 
-      if (isLoteMode && produtoExistente) {
-        produtoId = produtoExistente.id
-        await supabase.from('produtos')
-          .update({ preco_venda: parseFloat(dados.precoVenda) || 0 })
-          .eq('id', produtoId)
-      } else {
-        // VERIFICAÇÃO INTELIGENTE DO CÓDIGO
-        let codigoFinal = dados.codigoBarras?.trim();
-        
-        // Se o usuário clicou em pular ou deixou vazio, gera um automático e único!
-        if (!codigoFinal) {
-          codigoFinal = await gerarCodigoUnico();
-        }
-
-        const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
-          nome: dados.nome,
-          tipo: dados.tipo,
-          preco_venda: parseFloat(dados.precoVenda) || 0,
-          codigo_barras: codigoFinal,
-          marca_id: dados.marcaId,
-          preco_custo: parseFloat(dados.precoCusto) || 0,
-          estoque: parseInt(dados.estoque) || 0
-        }]).select().single()
-
-        if (erroProd) throw erroProd
-        produtoId = novoProduto.id
-      }
-
-      const { data: loteAtivo } = await supabase.from('estoque_lotes')
-        .select('id').eq('produto_id', produtoId).eq('status', 'ativo').limit(1)
-
-      const statusDoLote = loteAtivo && loteAtivo.length > 0 ? 'espera' : 'ativo'
-
-      const { error: erroLote } = await supabase.from('estoque_lotes').insert([{
-        produto_id: produtoId,
-        quantidade_inicial: parseInt(dados.estoque) || 0,
-        quantidade_atual: parseInt(dados.estoque) || 0,
-        preco_custo: parseFloat(dados.precoCusto) || 0,
-        status: statusDoLote
-      }])
-
-      if (erroLote) throw erroLote
+      await callIdempotentRpc({
+        userId: profile.id,
+        operation: 'entrada_estoque',
+        functionName: 'registrar_entrada_estoque',
+        payload: {
+          product_id: isLoteMode ? produtoExistente?.id : null,
+          name: isLoteMode ? null : dados.nome.trim(),
+          tipo: isLoteMode ? null : dados.tipo,
+          codigo_barras: isLoteMode ? null : codigoFinal,
+          marca_id: isLoteMode ? null : (dados.marcaId || null),
+          quantity: parseInt(dados.estoque, 10) || 0,
+          unit_cost: Number((parseFloat(dados.precoCusto) || 0).toFixed(2)),
+          unit_price: Number((parseFloat(dados.precoVenda) || 0).toFixed(2)),
+        },
+      })
 
       setSucesso(true)
     } catch (error) {

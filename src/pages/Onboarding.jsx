@@ -12,7 +12,9 @@ export default function Onboarding() {
   const [salvando, setSalvando] = useState(false)
 
   useEffect(() => {
-    if (profile?.ativo) navigate('/admin-home', { replace: true })
+    if (profile?.ativo) {
+      navigate(profile.role === 'funcionario' ? '/caixa' : '/admin-home', { replace: true })
+    }
   }, [navigate, profile])
 
   if (isLoading) {

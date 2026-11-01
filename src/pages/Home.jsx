@@ -45,7 +45,11 @@ export default function Home() {
 
   useEffect(() => {
     if (isLoading || !user || profileError) return
-    navigate(profile?.ativo ? '/admin-home' : '/onboarding', { replace: true })
+    if (!profile || !profile.ativo) {
+      navigate('/onboarding', { replace: true })
+      return
+    }
+    navigate(profile.role === 'funcionario' ? '/caixa' : '/admin-home', { replace: true })
   }, [isLoading, navigate, profile, profileError, user])
 
   useEffect(() => {

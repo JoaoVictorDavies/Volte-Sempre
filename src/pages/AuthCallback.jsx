@@ -5,11 +5,17 @@ import { supabase } from '../services/supabase'
 
 export default function AuthCallback() {
   const navigate = useNavigate()
-  const { user, profile, isLoading, profileError } = useAuth()
+  const { user, profile, isLoading, profileError, retryProfile } = useAuth()
   const [callbackSession, setCallbackSession] = useState(null)
   const [sessionChecked, setSessionChecked] = useState(false)
   const [sessionError, setSessionError] = useState(null)
+  const [inviteError, setInviteError] = useState(null)
   const hashCleaned = useRef(false)
+  const inviteHandled = useRef(false)
+  const [acceptingInvite, setAcceptingInvite] = useState(false)
+
+  const inviteToken = new URLSearchParams(window.location.search).get('convite')
+    || window.sessionStorage.getItem('volte_convite_pendente')
 
   useEffect(() => {
     let active = true
@@ -64,22 +70,58 @@ export default function AuthCallback() {
       return
     }
     if (user?.id !== callbackSession.user.id || isLoading) return
-    if (profileError) return
+    if (profileError || sessionError || inviteError) return
 
-    navigate(profile?.ativo ? '/admin-home' : '/onboarding', { replace: true })
+    if (profile?.ativo) {
+      window.sessionStorage.removeItem('volte_convite_pendente')
+      navigate(profile.role === 'funcionario' ? '/caixa' : '/admin-home', { replace: true })
+      return
+    }
+
+    if (!inviteToken) {
+      navigate('/onboarding', { replace: true })
+      return
+    }
+
+    if (inviteHandled.current) return
+    inviteHandled.current = true
+    setAcceptingInvite(true)
+    supabase.rpc('aceitar_convite', { p_token: inviteToken })
+      .then(async ({ error }) => {
+        if (error) throw error
+        const nextProfile = await retryProfile()
+        if (!nextProfile?.ativo) {
+          throw new Error('O convite foi aceito, mas o perfil da loja ainda não foi carregado.')
+        }
+        window.sessionStorage.removeItem('volte_convite_pendente')
+        window.history.replaceState(
+          window.history.state,
+          '',
+          window.location.pathname,
+        )
+        navigate('/caixa', { replace: true })
+      })
+      .catch((error) => {
+        console.error('Erro ao aceitar convite:', error)
+        setInviteError(error)
+      })
+      .finally(() => setAcceptingInvite(false))
   }, [
     callbackSession,
+    inviteError,
+    inviteToken,
     isLoading,
     navigate,
     profile,
     profileError,
+    retryProfile,
     sessionChecked,
     sessionError,
     user,
   ])
 
-  if (sessionError || profileError) {
-    const message = sessionError?.message ?? profileError.message
+  if (sessionError || profileError || inviteError) {
+    const message = sessionError?.message ?? profileError?.message ?? inviteError.message
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#11100e] px-5 text-[#f8f6ef]">
         <section className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center">
@@ -87,10 +129,10 @@ export default function AuthCallback() {
           <p className="mt-3 text-sm leading-6 text-white/60">{message}</p>
           <button
             type="button"
-            onClick={() => navigate('/login', { replace: true })}
+            onClick={() => inviteError ? window.location.reload() : navigate('/login', { replace: true })}
             className="mt-6 rounded-full bg-[#ffd60a] px-5 py-3 text-sm font-semibold text-[#17140a]"
           >
-            Voltar para o login
+            {inviteError ? 'Tentar convite novamente' : 'Voltar para o login'}
           </button>
         </section>
       </main>
@@ -99,7 +141,9 @@ export default function AuthCallback() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#11100e] text-[#f8f6ef]">
-      <p role="status" className="text-sm text-white/65">Concluindo seu acesso seguro...</p>
+      <p role="status" className="text-sm text-white/65">
+        {acceptingInvite ? 'Confirmando seu convite...' : 'Concluindo seu acesso seguro...'}
+      </p>
     </main>
   )
 }

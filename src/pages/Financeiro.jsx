@@ -1,16 +1,28 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { dispararNotificacao } from '../services/notificacoes'
+import { useAuth } from '../context/useAuth'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-  ArrowLeft, Wallet, Lock, Unlock, Clock, Calendar, 
+  ArrowLeft, Wallet, Lock, Unlock, Calendar,
   TrendingUp, X, Receipt, ShoppingBag, Search, Filter, 
   ArrowRight, Package, BarChart3, ChevronRight, AlertCircle, NotepadText
 } from 'lucide-react'
 
+function getVendaPagamento(venda, metodo) {
+  const pagamentos = Array.isArray(venda.pagamentos) ? venda.pagamentos : []
+  if (pagamentos.length > 0) {
+    return pagamentos.reduce((total, pagamento) => (
+      pagamento.method === metodo ? total + Number(pagamento.amount) : total
+    ), 0)
+  }
+  return venda.metodo_pagamento?.trim().toLowerCase() === metodo ? Number(venda.total) : 0
+}
+
 export default function Financeiro() {
   const navigate = useNavigate()
+  const { profile } = useAuth()
   
   // Controle de Telas (Navegação interna)
   // 'main' | 'estoque' | 'mensal' | 'extratos'
@@ -35,47 +47,52 @@ export default function Financeiro() {
   const [filtroData, setFiltroData] = useState('')
 
   // Regra de Negócio: Dia 1
-  const hoje = new Date()
+  const [hoje] = useState(() => new Date())
   const isDiaUm = hoje.getDate() === 1
+
+  const carregarCaixas = useCallback(async () => {
+    if (!profile) return
+    setCarregando(true)
+    try {
+      const { data, error } = await supabase.from('caixa_sessoes')
+        .select('*')
+        .eq('loja_id', profile.loja_id)
+        .order('aberto_em', { ascending: false })
+      if (error) throw error
+
+      setCaixas({
+        abertos: data.filter(c => c.status === 'aberto'),
+        fechados: data.filter(c => c.status === 'fechado')
+      })
+    } catch (error) {
+      console.error('Erro ao carregar caixas:', error)
+    } finally {
+      setCarregando(false)
+    }
+  }, [profile])
 
   // ==========================================
   // 1. CARGA INICIAL E NOTIFICAÇÃO DO DIA 1
   // ==========================================
   useEffect(() => {
-    carregarCaixas()
+    if (!profile) return
+    void Promise.resolve().then(carregarCaixas)
 
     // Sistema automático de notificação no dia 1
     if (isDiaUm) {
       const mesPassado = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1).toLocaleDateString('pt-BR', { month: 'long' })
-      const flagRelatorio = `relatorio_gerado_${hoje.getFullYear()}_${hoje.getMonth()}`
+      const flagRelatorio = `relatorio_gerado_${profile.loja_id}_${hoje.getFullYear()}_${hoje.getMonth()}`
       
       if (!localStorage.getItem(flagRelatorio)) {
         dispararNotificacao(
           "📊 Fechamento Mensal Gerado!", 
-          `O relatório financeiro de ${mesPassado.toUpperCase()} já está disponível no painel.`
-        ).catch(err => console.error(err))
-        
-        localStorage.setItem(flagRelatorio, 'true')
+          `O relatório financeiro de ${mesPassado.toUpperCase()} já está disponível no painel.`,
+          profile.loja_id,
+        ).then(() => localStorage.setItem(flagRelatorio, 'true'))
+          .catch(err => console.error('Erro ao enviar fechamento mensal:', err))
       }
     }
-  }, [])
-
-  const carregarCaixas = async () => {
-    setCarregando(true)
-    try {
-      const { data, error } = await supabase.from('caixa_sessoes').select('*').order('aberto_em', { ascending: false })
-      if (error) throw error
-
-      setCaixas({ 
-        abertos: data.filter(c => c.status === 'aberto'), 
-        fechados: data.filter(c => c.status === 'fechado') 
-      })
-    } catch (error) {
-      console.error("Erro ao carregar caixas:", error)
-    } finally {
-      setCarregando(false)
-    }
-  }
+  }, [carregarCaixas, hoje, isDiaUm, profile])
 
   // ==========================================
   // 2. LÓGICA DO RELATÓRIO DE ESTOQUE
@@ -84,7 +101,9 @@ export default function Financeiro() {
     setView('estoque')
     setCarregandoRelatorio(true)
     try {
-      const { data: produtos, error } = await supabase.from('produtos').select('preco_venda, estoque_lotes(quantidade_atual, preco_custo)')
+      const { data: produtos, error } = await supabase.from('produtos')
+        .select('preco_venda, estoque_lotes(quantidade_atual, preco_custo)')
+        .eq('loja_id', profile.loja_id)
       if (error) throw error
 
       let totalCusto = 0
@@ -100,8 +119,9 @@ export default function Financeiro() {
       })
 
       setDadosEstoque({ custo: totalCusto, venda: totalVenda, lucro: totalVenda - totalCusto })
-    } catch (err) {
-      alert("Erro ao calcular estoque.")
+    } catch (error) {
+      console.error('Erro ao calcular estoque:', error)
+      alert(`Erro ao calcular estoque: ${error.message}`)
     } finally {
       setCarregandoRelatorio(false)
     }
@@ -135,10 +155,7 @@ export default function Financeiro() {
       ;(vendas || []).forEach(v => {
         const valorVenda = Number(v.total)
         totalFaturado += valorVenda
-        // Se a string de pagamento contiver ficha, separamos o valor
-        if (v.metodo_pagamento && v.metodo_pagamento.toLowerCase().includes('ficha')) {
-          totalFiado += valorVenda
-        }
+        totalFiado += getVendaPagamento(v, 'ficha')
       })
 
       setDadosMensal({
@@ -149,8 +166,9 @@ export default function Financeiro() {
         qtdVendas: vendas?.length || 0
       })
 
-    } catch (err) {
-      alert("Erro ao gerar relatório mensal.")
+    } catch (error) {
+      console.error('Erro ao gerar relatório mensal:', error)
+      alert(`Erro ao gerar relatório mensal: ${error.message}`)
     } finally {
       setCarregandoRelatorio(false)
     }
@@ -179,13 +197,11 @@ export default function Financeiro() {
 
       vendasProcessadas.forEach(venda => {
         faturamentoTotal += Number(venda.total)
-        const metodos = venda.metodo_pagamento.toLowerCase()
-        
-        // Separação de valores simplificada (baseada nos métodos da venda)
-        if (metodos.includes('dinheiro')) totalDinheiro += Number(venda.valor_recebido || venda.total)
-        if (metodos.includes('pix')) totalPix += Number(venda.total)
-        if (metodos.includes('credito') || metodos.includes('debito')) totalCartao += Number(venda.total)
-        if (metodos.includes('ficha')) totalFiado += Number(venda.total)
+        const valorDinheiro = getVendaPagamento(venda, 'dinheiro')
+        totalDinheiro += Math.max(0, valorDinheiro - Number(venda.troco || 0))
+        totalPix += getVendaPagamento(venda, 'pix')
+        totalCartao += getVendaPagamento(venda, 'credito') + getVendaPagamento(venda, 'debito')
+        totalFiado += getVendaPagamento(venda, 'ficha')
 
         venda.vendas_itens.forEach(item => {
           custoTotal += (Number(item.preco_custo) * item.quantidade)
@@ -198,7 +214,8 @@ export default function Financeiro() {
       })
 
     } catch (error) {
-      alert("Erro ao buscar detalhes do caixa.")
+      console.error('Erro ao buscar detalhes do caixa:', error)
+      alert(`Erro ao buscar detalhes do caixa: ${error.message}`)
     } finally {
       setCarregandoDetalhes(false)
     }

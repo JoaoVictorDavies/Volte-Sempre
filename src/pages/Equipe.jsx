@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ShieldCheck, User, UserRoundX, Users } from 'lucide-react'
+import { Copy, ShieldCheck, User, UserRoundX, Users } from 'lucide-react'
 import { supabase } from '../services/supabase'
 import { useAuth } from '../context/useAuth'
 
@@ -10,6 +10,10 @@ export default function Equipe() {
   const [equipe, setEquipe] = useState([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
+  const [convites, setConvites] = useState([])
+  const [emailConvite, setEmailConvite] = useState('')
+  const [linkConvite, setLinkConvite] = useState('')
+  const [criandoConvite, setCriandoConvite] = useState(false)
 
   const buscarEquipe = useCallback(async () => {
     if (!profile) return []
@@ -23,11 +27,26 @@ export default function Equipe() {
     return data || []
   }, [profile])
 
+  const buscarConvites = useCallback(async () => {
+    if (!profile) return []
+    const { data, error } = await supabase
+      .from('convites_loja')
+      .select('id, token, email, criado_em, expira_em')
+      .eq('loja_id', profile.loja_id)
+      .is('aceito_em', null)
+      .is('revogado_em', null)
+      .order('criado_em', { ascending: false })
+    if (error) throw error
+    return data || []
+  }, [profile])
+
   useEffect(() => {
     let active = true
-    buscarEquipe()
-      .then((members) => {
-        if (active) setEquipe(members)
+    Promise.all([buscarEquipe(), buscarConvites()])
+      .then(([members, pendingInvites]) => {
+        if (!active) return
+        setEquipe(members)
+        setConvites(pendingInvites)
       })
       .catch((error) => {
         console.error('Erro ao carregar equipe:', error)
@@ -37,29 +56,76 @@ export default function Equipe() {
         if (active) setCarregando(false)
       })
     return () => { active = false }
-  }, [buscarEquipe])
+  }, [buscarConvites, buscarEquipe])
+
+  const criarConvite = async (event) => {
+    event.preventDefault()
+    setErro('')
+    setCriandoConvite(true)
+    try {
+      const { data: token, error } = await supabase.rpc('criar_convite', {
+        p_email: emailConvite.trim() || null,
+      })
+      if (error) throw error
+
+      const link = new URL('/', window.location.origin)
+      link.searchParams.set('convite', token)
+      setLinkConvite(link.toString())
+      setEmailConvite('')
+      setConvites(await buscarConvites())
+    } catch (error) {
+      console.error('Erro ao criar convite:', error)
+      setErro(error.message || 'Não foi possível gerar o convite.')
+    } finally {
+      setCriandoConvite(false)
+    }
+  }
+
+  const copiarConvite = async (link = linkConvite) => {
+    try {
+      await navigator.clipboard.writeText(link)
+    } catch (error) {
+      console.error('Erro ao copiar convite:', error)
+      setErro('Não foi possível copiar o link. Selecione e copie o endereço manualmente.')
+    }
+  }
+
+  const revogarConvite = async (convite) => {
+    if (!window.confirm('Revogar este convite? O link deixará de funcionar.')) return
+    try {
+      const { error } = await supabase
+        .from('convites_loja')
+        .update({ revogado_em: new Date().toISOString() })
+        .eq('id', convite.id)
+        .eq('loja_id', profile.loja_id)
+      if (error) throw error
+      setConvites(await buscarConvites())
+      if (convite.token === new URL(window.location.href).searchParams.get('convite')) {
+        setLinkConvite('')
+      }
+    } catch (error) {
+      console.error('Erro ao revogar convite:', error)
+      setErro('Não foi possível revogar o convite.')
+    }
+  }
 
   const desativarMembro = async (membro) => {
     if (membro.role === 'dono') return
     if (!window.confirm(`Desativar o acesso de ${membro.nome}?`)) return
 
     setCarregando(true)
-    const { error } = await supabase
-      .from('usuarios')
-      .update({ ativo: false })
-      .eq('id', membro.id)
-      .eq('loja_id', profile.loja_id)
-    if (error) {
-      console.error('Erro ao desativar membro:', error)
-      setErro('Não foi possível desativar esse acesso.')
-      return
-    }
-
     try {
+      const { error } = await supabase
+        .from('usuarios')
+        .update({ ativo: false })
+        .eq('id', membro.id)
+        .eq('loja_id', profile.loja_id)
+      if (error) throw error
+
       setEquipe(await buscarEquipe())
     } catch (error) {
-      console.error('Erro ao atualizar equipe:', error)
-      setErro('O acesso foi atualizado, mas não foi possível recarregar a equipe.')
+      console.error('Erro ao desativar membro:', error)
+      setErro('Não foi possível desativar esse acesso.')
     } finally {
       setCarregando(false)
     }
@@ -89,11 +155,82 @@ export default function Equipe() {
         </div>
       </header>
 
-      <aside className="mt-7 rounded-2xl border border-[#e7d89e] bg-[#fff9df] p-4 text-sm leading-6 text-[#645522]">
-        A criação e o envio de convites de funcionários serão habilitados na etapa de onboarding. Não existe mais acesso por PIN.
-      </aside>
-
       {erro && <p role="alert" className="mt-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-700">{erro}</p>}
+
+      <section className="mt-7 rounded-3xl border border-black/[0.07] bg-white p-5 sm:p-6">
+        <h2 className="text-lg font-semibold text-[#191813]">Convidar funcionário</h2>
+        <p className="mt-1 text-sm text-black/55">
+          Gere um link para a pessoa entrar com a conta Google e acessar o caixa.
+        </p>
+        <form onSubmit={criarConvite} className="mt-4 flex flex-col gap-3 sm:flex-row">
+          <input
+            type="email"
+            value={emailConvite}
+            onChange={(event) => setEmailConvite(event.target.value)}
+            placeholder="E-mail (opcional)"
+            className="min-w-0 flex-1 rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-[#c39b18]"
+          />
+          <button
+            type="submit"
+            disabled={criandoConvite}
+            className="rounded-xl bg-[#ffd60a] px-5 py-3 text-sm font-semibold text-[#17140a] disabled:opacity-50"
+          >
+            {criandoConvite ? 'Gerando...' : 'Gerar convite'}
+          </button>
+        </form>
+        {linkConvite && (
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              aria-label="Link do convite criado"
+              readOnly
+              value={linkConvite}
+              onFocus={(event) => event.target.select()}
+              className="min-w-0 flex-1 rounded-xl border border-black/10 bg-black/[0.02] px-4 py-3 text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => copiarConvite()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-black/10 px-4 py-3 text-sm font-medium"
+            >
+              <Copy size={16} /> Copiar link
+            </button>
+          </div>
+        )}
+        {convites.length > 0 && (
+          <ul className="mt-5 divide-y divide-black/[0.06]">
+            {convites.map((convite) => {
+              const link = new URL('/', window.location.origin)
+              link.searchParams.set('convite', convite.token)
+              return (
+                <li key={convite.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{convite.email || 'Convite sem e-mail definido'}</p>
+                    <p className="mt-1 text-xs text-black/45">
+                      Expira em {new Date(convite.expira_em).toLocaleDateString('pt-BR')}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => copiarConvite(link.toString())}
+                      className="rounded-lg border border-black/10 px-3 py-2 text-xs font-medium"
+                    >
+                      Copiar link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => revogarConvite(convite)}
+                      className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700"
+                    >
+                      Revogar
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
 
       <section className="mt-6 overflow-hidden rounded-3xl border border-black/[0.07] bg-white">
         {carregando ? (

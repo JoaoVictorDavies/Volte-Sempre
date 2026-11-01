@@ -5,6 +5,7 @@ import { Lock, Unlock, ShieldAlert, Printer, BookOpen } from 'lucide-react'
 import ThermalPrinterEncoder from 'thermal-printer-encoder'
 import { dispararNotificacao } from '../services/notificacoes'
 import { useAuth } from '../context/useAuth'
+import { callIdempotentRpc } from '../services/idempotentRpc'
 
 export default function CaixaHome() {
   const navigate = useNavigate()
@@ -62,26 +63,29 @@ export default function CaixaHome() {
     if (!profile || !user) return
     setCarregando(true)
     try {
+      const { sessao_id: sessaoId } = await callIdempotentRpc({
+        userId: user.id,
+        operation: 'abrir_caixa',
+        functionName: 'abrir_caixa',
+        payload: { loja_id: profile.loja_id },
+        rpcArguments: {},
+      })
       const { data, error } = await supabase
         .from('caixa_sessoes')
-        .insert([{ 
-          operador: profile.nome,
-          usuario_id: user.id,
-          perfil_id: user.id,
-          loja_id: profile.loja_id,
-        }])
-        .select()
+        .select('*')
+        .eq('id', sessaoId)
+        .eq('loja_id', profile.loja_id)
         .single()
-
       if (error) throw error
 
       setSessaoAtiva(data)
       localStorage.setItem('volte_sessao_caixa', JSON.stringify(data))
       const horaAbertura = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      dispararNotificacao(
+      await dispararNotificacao(
         "🟢 Caixa Aberto", 
-        `Caixa aberto por ${profile.nome} às ${horaAbertura}. Que Deus abençoe sua jornada de trabalho e traga excelentes vendas! 🙏✨`
-      );
+        `Caixa aberto por ${profile.nome} às ${horaAbertura}. Que Deus abençoe sua jornada de trabalho e traga excelentes vendas! 🙏✨`,
+        profile.loja_id,
+      ).catch((error) => console.error('Erro ao notificar abertura do caixa:', error))
 
       navigate('/pdv')
     } catch (error) {
@@ -99,53 +103,23 @@ export default function CaixaHome() {
     if (!user || !profile) return
     setCarregando(true)
     try {
-      // Puxa vendas e troco desta sessão
-      const { data: vendas, error: erroVendas } = await supabase
-        .from('vendas')
-        .select('total, metodo_pagamento, troco')
-        .eq('sessao_id', sessaoParaFechar.id)
-        .eq('loja_id', profile.loja_id)
-      if (erroVendas) throw erroVendas
-
-      const vendasProcessadas = vendas || []
-      
-      // Filtros mais robustos para não bugar em pagamentos mistos (ex: "pix, dinheiro")
-      const totalDinheiro = vendasProcessadas.filter(v => v.metodo_pagamento === 'dinheiro').reduce((acc, v) => acc + Number(v.total), 0)
-      const totalPix = vendasProcessadas.filter(v => v.metodo_pagamento === 'pix').reduce((acc, v) => acc + Number(v.total), 0)
-      const totalCartao = vendasProcessadas.filter(v => ['credito', 'debito'].includes(v.metodo_pagamento)).reduce((acc, v) => acc + Number(v.total), 0)
-      const totalMisto = vendasProcessadas.filter(v => v.metodo_pagamento.includes(',')).reduce((acc, v) => acc + Number(v.total), 0)
-
-      // Totais Globais
-      const totalGeral = vendasProcessadas.reduce((acc, v) => acc + Number(v.total), 0)
-      const totalTroco = vendasProcessadas.reduce((acc, v) => acc + Number(v.troco || 0), 0)
-      const ticketMedio = vendasProcessadas.length > 0 ? totalGeral / vendasProcessadas.length : 0
-
-      const dataFechamento = new Date().toISOString()
-
-      const { data: sessaoFechada, error: erroFechamento } = await supabase
-        .from('caixa_sessoes')
-        .update({
-          status: 'fechado',
-          fechado_em: dataFechamento,
-          usuario_id: user.id,
-          fechado_por: user.id,
-        })
-        .eq('id', sessaoParaFechar.id)
-        .eq('loja_id', profile.loja_id)
-        .eq('status', 'aberto')
-        .select('id')
-        .maybeSingle()
-      if (erroFechamento) throw erroFechamento
-      if (!sessaoFechada) throw new Error('A sessão já foi encerrada ou não está mais disponível.')
+      const resumo = await callIdempotentRpc({
+        userId: user.id,
+        operation: `fechar_caixa_${sessaoParaFechar.id}`,
+        functionName: 'fechar_caixa',
+        payload: { sessao_id: sessaoParaFechar.id },
+        rpcArguments: { p_sessao_id: sessaoParaFechar.id },
+      })
 
       // ==========================================
       // NOTIFICAÇÃO: CAIXA FECHADO
       // ==========================================
       const horaFechamento = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      dispararNotificacao(
+      await dispararNotificacao(
         "🔴 Caixa Fechado", 
-        `Caixa de ${sessaoParaFechar.operador} fechado às ${horaFechamento}. Bom descanso e até amanhã! 🌙`
-      );
+        `Caixa de ${sessaoParaFechar.operador} fechado às ${horaFechamento}. Bom descanso e até amanhã! 🌙`,
+        profile.loja_id,
+      ).catch((error) => console.error('Erro ao notificar fechamento do caixa:', error))
 
       // Exibe resumo apenas para o funcionário que fechou o próprio caixa
       const sessaoPropria = sessaoParaFechar.usuario_id === user.id
@@ -154,15 +128,15 @@ export default function CaixaHome() {
         setResumoFechamento({
           operador: sessaoParaFechar.operador,
           aberto_em: sessaoParaFechar.aberto_em,
-          fechado_em: dataFechamento,
-          dinheiro: totalDinheiro, 
-          pix: totalPix, 
-          cartao: totalCartao, 
-          misto: totalMisto,
-          geral: totalGeral, 
-          qtdVendas: vendasProcessadas.length,
-          ticketMedio: ticketMedio,
-          trocoTotal: totalTroco
+          fechado_em: resumo.fechado_em,
+          dinheiro: resumo.dinheiro,
+          pix: resumo.pix,
+          cartao: resumo.cartao,
+          misto: resumo.misto,
+          geral: resumo.geral,
+          qtdVendas: resumo.qtd_vendas,
+          ticketMedio: resumo.ticket_medio,
+          trocoTotal: resumo.troco_total
         })
         localStorage.removeItem('volte_sessao_caixa')
         setSessaoAtiva(null)

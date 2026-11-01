@@ -3,10 +3,21 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { dispararNotificacao } from '../services/notificacoes' // Importando a notificação
 import { useAuth } from '../context/useAuth'
+import { callIdempotentRpc } from '../services/idempotentRpc'
 import { 
   UserPlus, Search, DollarSign, PlusCircle, CreditCard, 
   ArrowLeft, Calendar, CheckCircle2, History, X, User, Edit3, Trash2, ShoppingBag, AlertCircle
 } from 'lucide-react'
+
+function getValorFicha(venda) {
+  const pagamentos = Array.isArray(venda.pagamentos) ? venda.pagamentos : []
+  if (pagamentos.length > 0) {
+    return pagamentos.reduce((total, pagamento) => (
+      pagamento.method === 'ficha' ? total + Number(pagamento.amount) : total
+    ), 0)
+  }
+  return venda.metodo_pagamento?.trim().toLowerCase() === 'ficha' ? Number(venda.total) : 0
+}
 
 export default function Fiado() {
   const navigate = useNavigate()
@@ -41,13 +52,15 @@ export default function Fiado() {
     const { data: listaClientes, error: erroClientes } = await supabase
       .from('clientes')
       .select('*')
+      .eq('loja_id', profile.loja_id)
       .order('nome')
     if (erroClientes) throw erroClientes
 
     const { data: contas, error: erroContas } = await supabase
       .from('fiado_contas')
       .select('*')
-      .neq('status', 'paga')
+      .eq('loja_id', profile.loja_id)
+      .eq('status', 'aberta')
     if (erroContas) throw erroContas
 
     return (listaClientes || []).map((cliente) => {
@@ -58,7 +71,7 @@ export default function Fiado() {
       )
       return { ...cliente, saldoDevido }
     })
-  }, [])
+  }, [profile])
 
   const carregarClientes = useCallback(async () => {
     setCarregando(true)
@@ -81,8 +94,8 @@ export default function Fiado() {
   // ==========================================
   const buscarFichaCliente = useCallback(async (clienteId) => {
     const [resContas, resPagamentos] = await Promise.all([
-      supabase.from('fiado_contas').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false }),
-      supabase.from('fiado_pagamentos').select('*').eq('cliente_id', clienteId).order('criado_em', { ascending: false })
+      supabase.from('fiado_contas').select('*').eq('loja_id', profile.loja_id).eq('cliente_id', clienteId).order('criado_em', { ascending: false }),
+      supabase.from('fiado_pagamentos').select('*').eq('loja_id', profile.loja_id).eq('cliente_id', clienteId).order('criado_em', { ascending: false })
     ])
     if (resContas.error) throw resContas.error
     if (resPagamentos.error) throw resPagamentos.error
@@ -90,7 +103,7 @@ export default function Fiado() {
       contas: resContas.data || [],
       pagamentos: resPagamentos.data || [],
     }
-  }, [])
+  }, [profile])
 
   const carregarFichaCliente = useCallback(async (clienteId) => {
     try {
@@ -160,7 +173,8 @@ export default function Fiado() {
         dataCli = data
         alert("Cliente cadastrado com sucesso!")
       } else {
-        const { data, error } = await supabase.from('clientes').update(payload).eq('id', dados.id).select().single()
+        const { data, error } = await supabase.from('clientes').update(payload)
+          .eq('id', dados.id).eq('loja_id', profile.loja_id).select().single()
         if (error) throw error
         dataCli = data
         alert("Ficha atualizada com sucesso!")
@@ -189,7 +203,9 @@ export default function Fiado() {
     if (!window.confirm(`Tem certeza que deseja excluir a ficha de ${cliente.nome}?`)) return
 
     try {
-      await supabase.from('clientes').delete().eq('id', cliente.id)
+      const { error } = await supabase.from('clientes').delete()
+        .eq('id', cliente.id).eq('loja_id', profile.loja_id)
+      if (error) throw error
       alert("Ficha excluída com sucesso!")
       setClienteSelecionado(null)
       carregarClientes()
@@ -209,7 +225,8 @@ export default function Fiado() {
       // MODIFICAÇÃO: Busca apenas vendas que contém 'ficha' no método de pagamento
       const { data: vendas, error: errVendas } = await supabase
         .from('vendas')
-        .select('id, total, criado_em, metodo_pagamento, vendas_itens(nome, quantidade)')
+        .select('id, total, criado_em, metodo_pagamento, pagamentos, vendas_itens(nome, quantidade)')
+        .eq('loja_id', profile.loja_id)
         .ilike('metodo_pagamento', '%ficha%') 
         .order('criado_em', { ascending: false })
         .limit(50)
@@ -217,8 +234,13 @@ export default function Fiado() {
       if (errVendas) throw errVendas
 
       // Busca quais vendas já foram vinculadas ao fiado (para não duplicar)
-      const { data: jaVinculadas } = await supabase.from('fiado_contas').select('venda_id').not('venda_id', 'is', null)
-      const idsVinculados = jaVinculadas.map(v => v.venda_id)
+      const { data: jaVinculadas, error: erroVinculadas } = await supabase
+        .from('fiado_contas')
+        .select('venda_id')
+        .eq('loja_id', profile.loja_id)
+        .not('venda_id', 'is', null)
+      if (erroVinculadas) throw erroVinculadas
+      const idsVinculados = (jaVinculadas || []).map(v => v.venda_id)
 
       // Filtra mostrando apenas vendas marcadas como ficha que AINDA NÃO FORAM vinculadas
       const disponiveis = (vendas || []).filter(v => !idsVinculados.includes(v.id))
@@ -232,27 +254,32 @@ export default function Fiado() {
   }
 
   const confirmarVinculoVenda = async (venda) => {
-    if (!window.confirm(`Lançar esta compra de R$ ${venda.total.toFixed(2)} para ${clienteSelecionado.nome}?`)) return
+    const valorFicha = getValorFicha(venda)
+    if (valorFicha <= 0) {
+      alert('Esta venda não possui um valor válido pago em ficha.')
+      return
+    }
+    if (!window.confirm(`Lançar esta compra de R$ ${valorFicha.toFixed(2)} para ${clienteSelecionado.nome}?`)) return
 
     const itensDesc = venda.vendas_itens.map(i => `${i.quantidade}x ${i.nome}`).join(', ')
 
     try {
-      const { error: erroConta } = await supabase.from('fiado_contas').insert([{
-        loja_id: profile.loja_id,
-        usuario_id: user.id,
-        cliente_id: clienteSelecionado.id,
-        venda_id: venda.id,
-        valor_total: venda.total,
-        valor_pago: 0,
-        status: 'aberta',
-        descricao: `Ficha PDV: ${itensDesc}`
-      }])
-      if (erroConta) throw erroConta
+      await callIdempotentRpc({
+        userId: user.id,
+        operation: `vincular_venda_${venda.id}`,
+        functionName: 'vincular_venda_fiado',
+        payload: {
+          venda_id: venda.id,
+          cliente_id: clienteSelecionado.id,
+          descricao: `Ficha PDV: ${itensDesc}`,
+        },
+      })
 
       // Dispara a notificação de nova dívida
       await dispararNotificacao(
         "📝 Nova Ficha Vinculada!", 
-        `Uma compra do caixa (R$ ${venda.total.toFixed(2)}) foi vinculada à ficha de ${clienteSelecionado.nome}.`
+        `Uma compra do caixa (R$ ${valorFicha.toFixed(2)}) foi vinculada à ficha de ${clienteSelecionado.nome}.`,
+        profile.loja_id,
       ).catch(err => console.error("Erro notificação:", err))
 
       alert("Compra vinculada com sucesso!")
@@ -269,41 +296,31 @@ export default function Fiado() {
   // 5. LANÇAR DÉBITO MANUAL
   // ==========================================
   const salvarDebitoManual = async () => {
-    const valor = parseFloat(novoDebito.valor_total)
+    const valor = Math.round((parseFloat(novoDebito.valor_total) || 0) * 100) / 100
     if (!valor || valor <= 0) return alert("Informe um valor válido.")
 
-    const entrada = parseFloat(novoDebito.valor_pago_inicial) || 0
-    const statusInicial = entrada >= valor ? 'paga' : 'aberta'
+    const entrada = Math.round((parseFloat(novoDebito.valor_pago_inicial) || 0) * 100) / 100
+    if (entrada < 0 || entrada > valor) return alert('A entrada deve estar entre zero e o valor da compra.')
 
     try {
-      const { data: contaCriada, error: erroConta } = await supabase.from('fiado_contas').insert([{
-        loja_id: profile.loja_id,
-        usuario_id: user.id,
-        cliente_id: clienteSelecionado.id,
-        valor_total: valor,
-        valor_pago: entrada,
-        status: statusInicial,
-        descricao: novoDebito.descricao || 'Compra manual sem descrição'
-      }]).select().single()
-      if (erroConta) throw erroConta
-
-      if (entrada > 0) {
-        const { error: erroPagamento } = await supabase.from('fiado_pagamentos').insert([{
-          loja_id: profile.loja_id,
-          usuario_id: user.id,
+      await callIdempotentRpc({
+        userId: user.id,
+        operation: `criar_debito_${clienteSelecionado.id}`,
+        functionName: 'criar_debito_fiado',
+        payload: {
           cliente_id: clienteSelecionado.id,
-          fiado_conta_id: contaCriada.id,
-          valor: entrada,
-          metodo_pagamento: 'dinheiro',
-          observacao: 'Entrada na hora da compra'
-        }])
-        if (erroPagamento) throw erroPagamento
-      }
+          total: valor,
+          entrada,
+          descricao: novoDebito.descricao || 'Compra manual sem descrição',
+          metodo_entrada: 'dinheiro',
+        },
+      })
 
       // Dispara a notificação
       await dispararNotificacao(
         "📝 Nova Dívida Adicionada", 
-        `Uma compra de R$ ${valor.toFixed(2)} foi adicionada à ficha de ${clienteSelecionado.nome}.`
+        `Uma compra de R$ ${valor.toFixed(2)} foi adicionada à ficha de ${clienteSelecionado.nome}.`,
+        profile.loja_id,
       ).catch(err => console.error("Erro notificação:", err))
 
       alert("Débito manual lançado!")
@@ -321,7 +338,7 @@ export default function Fiado() {
   // 6. REGISTRAR PAGAMENTO / ABATIMENTO
   // ==========================================
   const salvarPagamento = async () => {
-    let valorAbater = parseFloat(novoPagamento.valor)
+    const valorAbater = Math.round((parseFloat(novoPagamento.valor) || 0) * 100) / 100
     if (!valorAbater || valorAbater <= 0) return alert("Informe um valor válido.")
     
     if (valorAbater > clienteSelecionado.saldoDevido) {
@@ -330,42 +347,23 @@ export default function Fiado() {
     }
 
     try {
-      const { error: erroPagamento } = await supabase.from('fiado_pagamentos').insert([{
-        loja_id: profile.loja_id,
-        usuario_id: user.id,
-        cliente_id: clienteSelecionado.id,
-        valor: valorAbater,
-        metodo_pagamento: novoPagamento.metodo_pagamento,
-        observacao: novoPagamento.observacao || 'Abatimento de dívida'
-      }])
-      if (erroPagamento) throw erroPagamento
-
-      // Abate em cascata
-      const contasPendentes = extratoContas
-        .filter(c => c.status !== 'paga')
-        .sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em))
-
-      for (const conta of contasPendentes) {
-        if (valorAbater <= 0) break
-
-        const saldoConta = Number(conta.valor_total) - Number(conta.valor_pago)
-        const abatimento = Math.min(valorAbater, saldoConta)
-        const novoValorPago = Number(conta.valor_pago) + abatimento
-        const novoStatus = novoValorPago >= Number(conta.valor_total) ? 'paga' : 'aberta'
-
-        const { error: erroAtualizacao } = await supabase.from('fiado_contas')
-          .update({ valor_pago: novoValorPago, status: novoStatus, usuario_id: user.id })
-          .eq('id', conta.id)
-          .eq('loja_id', profile.loja_id)
-        if (erroAtualizacao) throw erroAtualizacao
-
-        valorAbater -= abatimento
-      }
+      await callIdempotentRpc({
+        userId: user.id,
+        operation: `registrar_pagamento_${clienteSelecionado.id}`,
+        functionName: 'registrar_pagamento_fiado',
+        payload: {
+          cliente_id: clienteSelecionado.id,
+          valor: valorAbater,
+          metodo_pagamento: novoPagamento.metodo_pagamento,
+          observacao: novoPagamento.observacao || 'Abatimento de dívida',
+        },
+      })
 
       // Notificação de Abatimento
       await dispararNotificacao(
         "💵 Pagamento Recebido!", 
-        `${clienteSelecionado.nome} abateu R$ ${Number(novoPagamento.valor).toFixed(2)} da sua dívida.`
+        `${clienteSelecionado.nome} abateu R$ ${Number(novoPagamento.valor).toFixed(2)} da sua dívida.`,
+        profile.loja_id,
       ).catch(err => console.error("Erro notificação:", err))
 
       alert("Pagamento registrado com sucesso!")
@@ -713,7 +711,7 @@ export default function Fiado() {
                       </p>
                     </div>
                     <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto mt-2 md:mt-0 pt-2 md:pt-0 border-t border-dashed md:border-0 border-gray-200">
-                      <span className="text-2xl font-black text-gray-800">R$ {v.total.toFixed(2)}</span>
+                      <span className="text-2xl font-black text-gray-800">R$ {getValorFicha(v).toFixed(2)}</span>
                       <button onClick={() => confirmarVinculoVenda(v)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-5 rounded-xl active:scale-95 transition-transform shadow-md">
                         Vincular a {clienteSelecionado?.nome.split(' ')[0]}
                       </button>

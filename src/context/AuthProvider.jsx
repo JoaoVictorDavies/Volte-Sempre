@@ -92,9 +92,19 @@ export function AuthProvider({ children }) {
   }, [loadProfile])
 
   const signInWithGoogle = useCallback(async () => {
+    const currentUrl = new URL(window.location.href)
+    const invitation = currentUrl.searchParams.get('convite')
+      || window.sessionStorage.getItem('volte_convite_pendente')
+    if (invitation) {
+      window.sessionStorage.setItem('volte_convite_pendente', invitation)
+    }
+
+    const callbackUrl = new URL('/auth/callback', window.location.origin)
+    if (invitation) callbackUrl.searchParams.set('convite', invitation)
+
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: callbackUrl.toString() },
     })
     if (error) throw error
   }, [])

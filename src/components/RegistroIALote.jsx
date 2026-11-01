@@ -2,9 +2,11 @@ import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../services/supabase'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import imageCompression from 'browser-image-compression'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Camera, Image as ImageIcon, Trash2, CheckCircle, PackagePlus, Loader2, Sparkles, DollarSign, Hash, Layers, Barcode } from 'lucide-react'
 import LeitorCamera from './LeitorCamera' // Importando o leitor de código
+import { useAuth } from '../context/useAuth'
+import { callIdempotentRpc } from '../services/idempotentRpc'
 
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null
@@ -18,6 +20,7 @@ const parseNumber = (value) => {
 const normalize = (str) => str ? str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : ''
 
 export default function RegistroIALote({ onVoltar }) {
+  const { profile, user } = useAuth()
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
   const [marcasDoBanco, setMarcasDoBanco] = useState([])
 
@@ -38,11 +41,12 @@ export default function RegistroIALote({ onVoltar }) {
   const [produtosLote, setProdutosLote] = useState([]) 
 
   useEffect(() => {
+    if (!profile) return
     async function carregarEstrutura() {
       try {
         const [resSetores, resMarcas] = await Promise.all([
-          supabase.from('setores').select('*'),
-          supabase.from('marcas').select('*')
+          supabase.from('setores').select('*').eq('loja_id', profile.loja_id),
+          supabase.from('marcas').select('*').eq('loja_id', profile.loja_id)
         ])
         if (resSetores.data) setSetoresDoBanco(resSetores.data)
         if (resMarcas.data) setMarcasDoBanco(resMarcas.data)
@@ -51,7 +55,7 @@ export default function RegistroIALote({ onVoltar }) {
       }
     }
     carregarEstrutura()
-  }, [])
+  }, [profile])
 
   // === PASSO 1.A: SUCESSO NO BIP (Gatilho para a Câmera) ===
   const handleBarcodeSucesso = async (codigo) => {
@@ -61,7 +65,12 @@ export default function RegistroIALote({ onVoltar }) {
 
     try {
       // Evita bipar algo que já existe
-      const { data: produtoExistente } = await supabase.from('produtos').select('nome').eq('codigo_barras', codigo).maybeSingle()
+      const { data: produtoExistente, error } = await supabase.from('produtos')
+        .select('nome')
+        .eq('loja_id', profile.loja_id)
+        .eq('codigo_barras', codigo)
+        .maybeSingle()
+      if (error) throw error
       if (produtoExistente) {
         alert(`O produto "${produtoExistente.nome}" já está cadastrado!`)
         setCarregando(false)
@@ -227,6 +236,8 @@ export default function RegistroIALote({ onVoltar }) {
     }
 
     setCarregando(true)
+    const totalInicial = produtosLote.length
+    let concluidos = 0
     
     try {
       for (let i = 0; i < produtosLote.length; i++) {
@@ -235,38 +246,37 @@ export default function RegistroIALote({ onVoltar }) {
         
         let imageUrlFinal = null
         if (prod.arquivoOriginal) {
-          const fileName = `ia_lote_${Date.now()}_${i}.jpg`
-          const { error: uploadError } = await supabase.storage.from('produtos').upload(fileName, prod.arquivoOriginal)
+          const fileName = `ia_lote_${user.id}_${prod.idUnico}.jpg`
+          const { error: uploadError } = await supabase.storage.from('produtos').upload(fileName, prod.arquivoOriginal, { upsert: true })
           if (uploadError) throw uploadError
           const { data: publicData } = supabase.storage.from('produtos').getPublicUrl(fileName)
           imageUrlFinal = publicData.publicUrl
         }
 
-        const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
-          nome: prod.nome,
-          codigo_barras: prod.codigoBarras || null, // AGORA O CÓDIGO É SALVO NO BANCO!
-          marca_id: prod.marcaId,
-          preco_venda: parseNumber(prod.precoVenda),
-          preco_custo: parseNumber(prod.precoCusto),
-          estoque: parseInt(prod.estoque, 10) || 0,
-          imagem_url: imageUrlFinal,
-          tipo: 'solo'
-        }]).select().single()
-
-        if (erroProd) throw erroProd
-
-        await supabase.from('estoque_lotes').insert([{
-          produto_id: novoProduto.id,
-          quantidade_inicial: parseInt(prod.estoque, 10) || 0,
-          quantidade_atual: parseInt(prod.estoque, 10) || 0,
-          preco_custo: parseNumber(prod.precoCusto),
-          status: 'ativo'
-        }])
+        await callIdempotentRpc({
+          userId: user.id,
+          operation: `registro_ia_${prod.idUnico}`,
+          functionName: 'registrar_entrada_estoque',
+          payload: {
+            name: prod.nome,
+            codigo_barras: prod.codigoBarras || null,
+            marca_id: prod.marcaId,
+            unit_price: parseNumber(prod.precoVenda),
+            unit_cost: parseNumber(prod.precoCusto),
+            quantity: parseInt(prod.estoque, 10) || 0,
+            imagem_url: imageUrlFinal,
+            tipo: 'solo',
+          },
+        })
+        setProdutosLote((pendentes) => pendentes.filter((item) => item.idUnico !== prod.idUnico))
+        concluidos += 1
       }
 
       setEtapa(3) 
     } catch (error) {
-      alert('Houve um erro ao tentar salvar o lote no banco de dados: ' + error.message)
+      alert(
+        `${concluidos} de ${totalInicial} produtos foram confirmados. Os itens restantes permanecem na lista; tente novamente para repetir a operação pendente sem duplicar registros. ${error.message}`,
+      )
     } finally {
       setCarregando(false)
       setStatusIA('')

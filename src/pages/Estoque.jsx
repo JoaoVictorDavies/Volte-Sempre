@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { ChevronDown, ChevronUp, Calendar, DollarSign, Package, Edit2, Check, X, Trash2, Camera, AlertCircle, Image as ImageIcon, Copy } from 'lucide-react'
 import LeitorCamera from '../components/LeitorCamera'
 import UploadFotoProduto from '../components/UploadFotoProduto' // ← Nosso novo componente!
+import { useAuth } from '../context/useAuth'
 
 // Mini-componente para gerenciar a "gaveta" de lotes e a exibição de cada produto
 function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
+  const { profile } = useAuth()
   const [expandido, setExpandido] = useState(false)
 
   // Estado para a Foto do Produto
@@ -33,8 +35,6 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
 
   useEffect(() => {
     if (isDestacado) {
-      setExpandido(true)
-      // Um pequeno delay para dar tempo da gaveta da Marca abrir antes de rolar a tela
       setTimeout(() => {
         document.getElementById(`produto-${produto.id}`)?.scrollIntoView({ 
           behavior: 'smooth', 
@@ -43,6 +43,8 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
       }, 300)
     }
   }, [isDestacado, produto.id])
+
+  const estaExpandido = expandido || Boolean(isDestacado)
 
   const handleSaveNome = async (e) => {
     e.stopPropagation() 
@@ -55,12 +57,13 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     try {
       const { error } = await supabase
         .from('produtos')
-        .update({ nome: editNome })
+        .update({ nome: editNome.trim() })
         .eq('id', produto.id)
+        .eq('loja_id', profile.loja_id)
 
       if (error) throw error
 
-      setDisplayNome(editNome)
+      setDisplayNome(editNome.trim())
       setIsEditing(false)
     } catch (error) {
       alert("Erro ao atualizar o nome do produto: " + error.message)
@@ -75,33 +78,26 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     setIsEditing(false)
   }
 
-  // EXCLUSÃO EM CASCATA (Corrige o erro de foreign key com vendas antigas)
+  // Arquivamento preserva o histórico e impede novas vendas.
   const handleExcluir = async (e) => {
     e.stopPropagation()
 
     // Regra de Negócio de Exclusão
-    if (produto.estoqueReal > 0) {
-      const confirma = window.confirm(`ATENÇÃO! Esse produto tem ${produto.estoqueReal} itens no estoque. Excluir permanentemente mesmo assim?`)
-      if (!confirma) return
-    } else {
-      const confirma = window.confirm(`Deseja realmente excluir este produto permanentemente do sistema?`)
-      if (!confirma) return
-    }
+    const confirma = window.confirm(
+      'Arquivar este produto? O histórico de vendas será preservado e o item deixará de aparecer no PDV.',
+    )
+    if (!confirma) return
 
     setIsSaving(true)
     try {
-      // 1. Apaga dependências de lotes
-      await supabase.from('estoque_lotes').delete().eq('produto_id', produto.id)
-      
-      // 2. Apaga histórico nas vendas (libera a trava do banco)
-      await supabase.from('vendas_itens').delete().eq('produto_id', produto.id)
-
-      // 3. Exclui o produto definitivo
-      const { error } = await supabase.from('produtos').delete().eq('id', produto.id)
+      const { error } = await supabase.from('produtos')
+        .update({ ativo: false })
+        .eq('id', produto.id)
+        .eq('loja_id', profile.loja_id)
       
       if (error) throw error
 
-      onAtualizar() // Recarrega a tela para o produto sumir
+      onAtualizar()
     } catch (error) {
       alert("Erro ao excluir o produto: " + error.message)
       setIsSaving(false)
@@ -135,7 +131,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     setNovaQuantidadeLote('')
   }
 
-  const salvarEdicaoLote = async (loteId) => {
+  const salvarEdicaoLote = async (lote) => {
     const qtdParsed = parseInt(novaQuantidadeLote, 10)
     if (isNaN(qtdParsed) || qtdParsed < 0) {
       alert("Por favor, insira um número válido (0 ou maior).")
@@ -146,8 +142,13 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     try {
       const { error } = await supabase
         .from('estoque_lotes')
-        .update({ quantidade_atual: qtdParsed })
-        .eq('id', loteId)
+        .update({
+          quantidade_atual: qtdParsed,
+          quantidade_inicial: Math.max(lote.quantidade_inicial, qtdParsed),
+          status: qtdParsed > 0 ? 'ativo' : 'esgotado',
+        })
+        .eq('id', lote.id)
+        .eq('loja_id', profile.loja_id)
 
       if (error) throw error
 
@@ -167,12 +168,12 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
     >
       {/* LINHA PRINCIPAL DO PRODUTO (Clicável) */}
       <div 
-        onClick={() => !isEditing && setExpandido(!expandido)}
+        onClick={() => !isEditing && setExpandido(!estaExpandido)}
         className={`flex justify-between items-center p-4 transition-colors ${!isEditing ? 'cursor-pointer hover:bg-gray-50' : ''}`}
       >
         <div className="flex items-start gap-3 flex-1">
           <div className={`mt-1 ${isDestacado ? 'text-blue-500' : 'text-gray-400'}`}>
-            {expandido ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+            {estaExpandido ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
           </div>
           <div className="flex-1">
 
@@ -273,7 +274,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
       </div>
 
       {/* GAVETA EXPANDIDA (Foto + Lotes) */}
-      {expandido && (
+      {estaExpandido && (
         <div className="bg-[#F9F9FB] border-t border-gray-100 p-5 flex flex-col md:flex-row gap-8">
 
           {/* COLUNA ESQUERDA: FOTO */}
@@ -331,7 +332,7 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
                               className="w-14 text-center font-bold text-gray-800 border-none focus:outline-none focus:ring-0 p-1"
                               autoFocus
                             />
-                            <button onClick={() => salvarEdicaoLote(lote.id)} disabled={salvandoLote} className="p-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors">
+                            <button onClick={() => salvarEdicaoLote(lote)} disabled={salvandoLote} className="p-1 bg-green-500 text-white rounded hover:bg-green-600 transition-colors">
                               <Check size={16} />
                             </button>
                             <button onClick={cancelarEdicaoLote} disabled={salvandoLote} className="p-1 bg-gray-200 text-gray-600 rounded hover:bg-gray-300 transition-colors">
@@ -371,29 +372,24 @@ function ProdutoItem({ produto, onAtualizar, produtoDestacadoId }) {
 // Mini-componente para gerenciar a "gaveta" das MARCAS (Recolhido por Padrão)
 function MarcaItem({ marcaNome, produtos, onAtualizar, produtoDestacadoId }) {
   const [expandido, setExpandido] = useState(false)
-
-  // Se a câmera leu um produto que pertence a esta marca, força a gaveta da marca a abrir
-  useEffect(() => {
-    if (produtoDestacadoId && produtos.some(p => p.id === produtoDestacadoId)) {
-      setExpandido(true)
-    }
-  }, [produtoDestacadoId, produtos])
+  const destacada = Boolean(produtoDestacadoId && produtos.some(p => p.id === produtoDestacadoId))
+  const estaExpandida = expandido || destacada
 
   return (
     <div className="relative border-b border-gray-100 last:border-0 pb-4 mb-4 last:mb-0 last:pb-0">
       {/* INDICADOR DE MARCA (Clicável) */}
       <div 
-        onClick={() => setExpandido(!expandido)}
+        onClick={() => setExpandido(!estaExpandida)}
         className="flex items-center gap-3 mb-2 cursor-pointer hover:bg-gray-50 p-2 -ml-2 rounded-xl transition-colors select-none"
       >
         <div className="w-1.5 h-6 bg-blue-500 rounded-full"></div>
         <h3 className="text-blue-600 font-bold text-xl tracking-tight">{marcaNome}</h3>
         <div className="text-blue-500 flex items-center gap-2">
-          {expandido ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
+          {estaExpandida ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
         </div>
 
         {/* Pílula informativa mostrando a quantidade de itens na marca (só aparece se estiver fechado) */}
-        {!expandido && (
+        {!estaExpandida && (
           <span className="text-xs font-bold text-blue-400 bg-blue-50 px-2 py-1 rounded-lg ml-2">
             {produtos.length} {produtos.length === 1 ? 'item' : 'itens'}
           </span>
@@ -401,7 +397,7 @@ function MarcaItem({ marcaNome, produtos, onAtualizar, produtoDestacadoId }) {
       </div>
 
       {/* LISTA DE PRODUTOS DA MARCA (Expansível) */}
-      {expandido && (
+      {estaExpandida && (
         <div className="pl-0 md:pl-4 mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
           {produtos.map(p => (
             <ProdutoItem 
@@ -419,6 +415,7 @@ function MarcaItem({ marcaNome, produtos, onAtualizar, produtoDestacadoId }) {
 
 export default function Estoque() {
   const navigate = useNavigate()
+  const { profile } = useAuth()
   const [carregando, setCarregando] = useState(true)
   const [dadosAgrupados, setDadosAgrupados] = useState({})
 
@@ -429,13 +426,14 @@ export default function Estoque() {
   // Estado para quando a câmera lê um código inexistente
   const [codigoNaoEncontrado, setCodigoNaoEncontrado] = useState(null)
 
-  const carregarEstoque = async () => {
-    setCarregando(true)
+  const carregarEstoque = useCallback(async () => {
+    if (!profile) return
     try {
       const [resSetores, resMarcas, resProdutos] = await Promise.all([
-        supabase.from('setores').select('*').order('nome'),
-        supabase.from('marcas').select('*').order('nome'),
-        supabase.from('produtos').select('*, estoque_lotes(*)').order('nome')
+        supabase.from('setores').select('*').eq('loja_id', profile.loja_id).order('nome'),
+        supabase.from('marcas').select('*').eq('loja_id', profile.loja_id).order('nome'),
+        supabase.from('produtos').select('*, estoque_lotes(*)')
+          .eq('loja_id', profile.loja_id).eq('ativo', true).order('nome')
       ])
 
       if (resSetores.error) throw resSetores.error
@@ -482,11 +480,11 @@ export default function Estoque() {
     } finally {
       setCarregando(false)
     }
-  }
+  }, [profile])
 
   useEffect(() => {
-    carregarEstoque()
-  }, [])
+    void Promise.resolve().then(carregarEstoque)
+  }, [carregarEstoque])
 
   // Função disparada quando o componente sniper (LeitorCamera) finaliza a leitura
   const handleCameraSucesso = (codigo) => {

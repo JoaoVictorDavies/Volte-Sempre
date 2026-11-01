@@ -2,8 +2,10 @@ import { useState, useRef } from 'react'
 import { supabase } from '../services/supabase'
 import imageCompression from 'browser-image-compression'
 import { Camera, Image as ImageIcon, Loader2 } from 'lucide-react'
+import { useAuth } from '../context/useAuth'
 
 export default function UploadFotoProduto({ produtoId, urlAtual, onUploadConcluido }) {
+  const { profile } = useAuth()
   const [carregando, setCarregando] = useState(false)
   const cameraInputRef = useRef(null)
   const galeriaInputRef = useRef(null)
@@ -48,6 +50,7 @@ export default function UploadFotoProduto({ produtoId, urlAtual, onUploadConclui
         .from('produtos')
         .update({ imagem_url: publicUrl })
         .eq('id', produtoId)
+        .eq('loja_id', profile.loja_id)
 
       if (updateError) throw updateError
 

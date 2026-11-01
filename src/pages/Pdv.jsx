@@ -30,6 +30,7 @@ export default function Pdv() {
   const [modalAberto, setModalAberto] = useState(false)
   const [pagamentos, setPagamentos] = useState([]) 
   const [processandoVenda, setProcessandoVenda] = useState(false)
+  const [tentativaPendente, setTentativaPendente] = useState(null)
   const [sessaoAtiva, setSessaoAtiva] = useState(null)
   const [sessaoValidada, setSessaoValidada] = useState(false)
   const [cameraAtiva, setCameraAtiva] = useState(false)
@@ -183,6 +184,23 @@ export default function Pdv() {
         const ultimoProdutoSalvo = localStorage.getItem(ultimoProdutoKey)
         if (carrinhoSalvo) setCarrinho(JSON.parse(carrinhoSalvo))
         if (ultimoProdutoSalvo) setUltimoProduto(JSON.parse(ultimoProdutoSalvo))
+        const pendingKey = `volte_pdv_venda_pendente_${sessao.id}`
+        const tentativaSalva = localStorage.getItem(pendingKey)
+        if (tentativaSalva) {
+          try {
+            const tentativa = JSON.parse(tentativaSalva)
+            setTentativaPendente(tentativa)
+            setPagamentos(tentativa.payload.payments.map((pagamento, index) => ({
+              id: index + 1,
+              metodo: pagamento.method,
+              valor: Number(pagamento.amount).toFixed(2),
+            })))
+            setModalAberto(true)
+          } catch (error) {
+            console.error('Tentativa de venda pendente inválida:', error)
+            localStorage.removeItem(pendingKey)
+          }
+        }
         setSessaoValidada(true)
 
         await Promise.all([carregarEstoque(), carregarHistoricoSessao(sessao.id)])
@@ -415,139 +433,114 @@ export default function Pdv() {
     }
 
     setProcessandoVenda(true)
+    let attempt = tentativaPendente
 
     try {
-      // Extrai os métodos sem repetição (ex: 'dinheiro, credito, ficha')
-      const metodosUnicos = [...new Set(pagamentos.map(p => p.metodo))]
-      const nomesMetodos = metodosUnicos.join(', ')
-
-      const { data: vendaCadastrada, error: erroVenda } = await supabase
-        .from('vendas')
-        .insert([{ 
-          total: total, 
-          metodo_pagamento: nomesMetodos, 
-          valor_recebido: totalRecebido,
-          troco: troco > 0 ? troco : 0,
-          sessao_id: sessaoAtiva.id,
-          loja_id: profile.loja_id,
-          usuario_id: user.id,
-        }]).select().single()
-
-      if (erroVenda) throw erroVenda
-
-      for (let item of carrinho) {
-        let produtoIdOficial = item.id;
-        
-        if (item.isNew) {
-           const { data: novoProdOficial, error: erroNovoProduto } = await supabase.from('produtos').insert([{
-              nome: item.nome, codigo_barras: item.codigo_barras, preco_venda: item.preco_venda,
-              preco_custo: item.preco_custo, estoque: 0, tipo: 'solo', loja_id: profile.loja_id
-           }]).select().single()
-           if (erroNovoProduto) throw erroNovoProduto
-           
-           if (novoProdOficial) {
-              produtoIdOficial = novoProdOficial.id;
-              item = { ...item, id: produtoIdOficial }; 
-           }
-        }
-
-        let qtdRestanteParaBaixar = item.qtd
-        const { data: lotes, error: erroLotes } = await supabase.from('estoque_lotes')
-          .select('*')
-          .eq('loja_id', profile.loja_id)
-          .eq('produto_id', produtoIdOficial)
-          .gt('quantidade_atual', 0)
-        if (erroLotes) throw erroLotes
-
-        const lotesOrdenados = (lotes || []).sort((a, b) => {
-          if (a.status === 'ativo' && b.status !== 'ativo') return -1;
-          if (a.status !== 'ativo' && b.status === 'ativo') return 1;
-          return new Date(a.criado_em) - new Date(b.criado_em);
-        });
-
-        for (const lote of lotesOrdenados) {
-          if (qtdRestanteParaBaixar <= 0) break;
-          const qtdDeducao = Math.min(qtdRestanteParaBaixar, lote.quantidade_atual)
-          const novaQtdLote = lote.quantidade_atual - qtdDeducao
-          const novoStatus = novaQtdLote === 0 ? 'esgotado' : 'ativo'
-
-          const { error: erroLote } = await supabase.from('estoque_lotes')
-            .update({ quantidade_atual: novaQtdLote, status: novoStatus })
-            .eq('id', lote.id)
-            .eq('loja_id', profile.loja_id)
-          if (erroLote) throw erroLote
-          const { error: erroItemVenda } = await supabase.from('vendas_itens').insert([{
-            venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
-            quantidade: qtdDeducao, preco_custo: lote.preco_custo, 
-            preco_venda: item.preco_venda,
-            loja_id: profile.loja_id,
-            usuario_id: user.id,
-          }])
-          if (erroItemVenda) throw erroItemVenda
-          
-          qtdRestanteParaBaixar -= qtdDeducao
-        }
-
-        if (qtdRestanteParaBaixar > 0) {
-          const { data: loteAjuste, error: erroLoteAjuste } = await supabase.from('estoque_lotes').insert([{
-            produto_id: produtoIdOficial, quantidade_inicial: qtdRestanteParaBaixar, quantidade_atual: 0,
-            preco_custo: item.preco_custo || (item.preco_venda * 0.5),
-            status: 'esgotado', loja_id: profile.loja_id
-          }]).select().single()
-          if (erroLoteAjuste) throw erroLoteAjuste
-          if (!loteAjuste) throw new Error('Não foi possível registrar o ajuste de estoque.')
-
-          if (loteAjuste) {
-            const { error: erroItemVenda } = await supabase.from('vendas_itens').insert([{
-              venda_id: vendaCadastrada.id, produto_id: produtoIdOficial, nome: item.nome,
-              quantidade: qtdRestanteParaBaixar, preco_custo: loteAjuste.preco_custo, 
-              preco_venda: item.preco_venda,
-              loja_id: profile.loja_id,
-              usuario_id: user.id,
-            }])
-            if (erroItemVenda) throw erroItemVenda
-          }
-        }
-
-        const estoqueTotalAnterior = item.estoqueTotal || 0;
-        const estoqueAtualCalculado = estoqueTotalAnterior - item.qtd;
-
-        if (estoqueAtualCalculado <= 0 && estoqueTotalAnterior > 0) {
-          await dispararNotificacao(
-            "⚠️ Produto Esgotado!", 
-            `Atenção! O estoque do produto "${item.nome}" acabou de zerar no caixa. Providencie reposição.`,
-            sessaoAtiva?.loja_id
-          ).catch(err => console.error("Erro na notificação:", err));
+      if (!attempt) {
+        attempt = {
+          key: crypto.randomUUID(),
+          payload: {
+            sessao_id: sessaoAtiva.id,
+            total: Number(total.toFixed(2)),
+            payments: pagamentos.map((pagamento) => ({
+              method: pagamento.metodo,
+              amount: Number((parseFloat(pagamento.valor) || 0).toFixed(2)),
+            })),
+            items: carrinho.map((item) => ({
+              id: item.isNew ? null : item.id,
+              is_new: Boolean(item.isNew),
+              name: item.nome,
+              tipo: item.tipo || 'solo',
+              codigo_barras: item.codigo_barras || null,
+              quantity: item.qtd,
+              unit_price: Number(Number(item.preco_venda).toFixed(2)),
+              unit_cost: Number(Number(item.preco_custo || 0).toFixed(2)),
+            })),
+          },
         }
       }
 
+      const pendingKey = `volte_pdv_venda_pendente_${sessaoAtiva.id}`
+      setTentativaPendente(attempt)
+      localStorage.setItem(pendingKey, JSON.stringify(attempt))
+
+      const { data: resultado, error: erroVenda } = await supabase.rpc('registrar_venda', {
+        p_chave: attempt.key,
+        p_payload: attempt.payload,
+      })
+      if (erroVenda) {
+        if (erroVenda.code) {
+          localStorage.removeItem(pendingKey)
+          setTentativaPendente(null)
+        }
+        throw erroVenda
+      }
+
+      const { data: vendaCadastrada, error: erroLeitura } = await supabase
+        .from('vendas')
+        .select('*, vendas_itens(*)')
+        .eq('id', resultado.venda_id)
+        .eq('loja_id', profile.loja_id)
+        .single()
+      if (erroLeitura) throw erroLeitura
+
+      const nomesMetodos = vendaCadastrada.metodo_pagamento
+      const vendaItens = vendaCadastrada.vendas_itens || []
+      const itensEsgotados = new Set(
+        carrinho
+          .filter((item) => {
+            const produtoAtual = estoqueCompleto.find((produto) => produto.id === item.id)
+            return produtoAtual
+              && produtoAtual.estoqueTotal > 0
+              && produtoAtual.estoqueTotal <= item.qtd
+          })
+          .map((item) => item.nome),
+      )
       const novaVendaRegistrada = {
         id: vendaCadastrada.id,
-        total: total,
-        valor_recebido: totalRecebido,
-        troco: troco > 0 ? troco : 0,
+        total: Number(vendaCadastrada.total),
+        valor_recebido: Number(vendaCadastrada.valor_recebido),
+        troco: Number(vendaCadastrada.troco),
         metodo_pagamento: nomesMetodos,
-        itens: [...carrinho],
-        data: new Date()
+        itens: vendaItens.map((item) => ({
+          nome: item.nome,
+          qtd: item.quantidade,
+          preco_venda: Number(item.preco_venda),
+        })),
+        data: new Date(vendaCadastrada.criado_em),
       }
-      setVendasDaSessao(prev => [novaVendaRegistrada, ...prev])
+      setVendasDaSessao((previous) => [
+        novaVendaRegistrada,
+        ...previous.filter((venda) => venda.id !== novaVendaRegistrada.id),
+      ])
 
-      alert("✅ Venda finalizada com sucesso!")
-      
-      const operadorCaixa = sessaoAtiva ? sessaoAtiva.operador : 'Operador Desconhecido';
+      alert('✅ Venda finalizada com sucesso!')
+      for (const nome of itensEsgotados) {
+        await dispararNotificacao(
+          '⚠️ Produto Esgotado!',
+          `Atenção! O estoque do produto "${nome}" acabou de zerar no caixa. Providencie reposição.`,
+          sessaoAtiva.loja_id,
+        ).catch((error) => console.error('Erro na notificação de estoque:', error))
+      }
       await dispararNotificacao(
-        "💰 Nova Venda Fechada!", 
-        `Venda de R$ ${total.toFixed(2)} no caixa por ${operadorCaixa}. (Pgto: ${nomesMetodos})`,
-        sessaoAtiva?.loja_id
-      ).catch(err => console.error(err));
+        '💰 Nova Venda Fechada!',
+        `Venda de R$ ${Number(vendaCadastrada.total).toFixed(2)} no caixa por ${sessaoAtiva.operador}. (Pgto: ${nomesMetodos})`,
+        sessaoAtiva.loja_id,
+      ).catch((error) => console.error('Erro na notificação:', error))
 
       setCarrinho([])
       setUltimoProduto(null)
       setModalAberto(false)
-      carregarEstoque()
-
+      localStorage.removeItem(pendingKey)
+      setTentativaPendente(null)
+      await Promise.all([carregarEstoque(), carregarHistoricoSessao(sessaoAtiva.id)])
     } catch (error) {
-      alert("Erro ao finalizar venda: " + error.message)
+      console.error('Erro ao finalizar venda:', error)
+      alert(
+        attempt && !error.code
+          ? 'Não foi possível confirmar a venda. Os itens foram preservados; tente novamente para verificar o mesmo pedido sem duplicá-lo. ' + error.message
+          : 'Erro ao finalizar venda: ' + error.message,
+      )
     } finally {
       setProcessandoVenda(false)
     }
@@ -736,7 +729,7 @@ export default function Pdv() {
                   <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">Selecione o(s) Pagamento(s)</h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {['dinheiro', 'pix', 'credito', 'debito', 'ficha'].map(tipo => (
-                      <button key={tipo} onClick={() => adicionarPagamento(tipo)} className="p-3 rounded-xl font-bold border-2 border-gray-200 text-gray-700 bg-white hover:bg-gray-50 hover:border-blue-300 transition-all flex flex-col items-center justify-center gap-1 shadow-sm active:scale-95">
+                      <button key={tipo} disabled={Boolean(tentativaPendente)} onClick={() => adicionarPagamento(tipo)} className="p-3 rounded-xl font-bold border-2 border-gray-200 text-gray-700 bg-white hover:bg-gray-50 hover:border-blue-300 transition-all flex flex-col items-center justify-center gap-1 shadow-sm active:scale-95 disabled:cursor-not-allowed disabled:opacity-50">
                         <span className="text-xl">
                           {tipo === 'dinheiro' ? '💵' : tipo === 'pix' ? '💠' : tipo === 'credito' ? '💳' : tipo === 'debito' ? '💳' : '📝'}
                         </span>
@@ -762,14 +755,15 @@ export default function Pdv() {
                             type="number" 
                             autoFocus={index === pagamentos.length - 1} 
                             value={pag.valor} 
-                            onChange={(e) => atualizarValorPagamento(pag.id, e.target.value)} 
+                            onChange={(e) => atualizarValorPagamento(pag.id, e.target.value)}
+                            disabled={Boolean(tentativaPendente)}
                             onKeyDown={(e) => {
                               if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault()
                             }}
                             className="w-full bg-gray-50 border border-gray-200 p-3 pl-10 rounded-xl font-bold text-lg text-gray-800 outline-none focus:bg-white focus:border-blue-400 transition-colors" 
                           />
                         </div>
-                        <button onClick={() => removerPagamento(pag.id)} className="w-12 h-12 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"><X size={24} /></button>
+                        <button disabled={Boolean(tentativaPendente)} onClick={() => removerPagamento(pag.id)} className="w-12 h-12 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-40"><X size={24} /></button>
                       </div>
                     ))}
                   </div>
@@ -778,13 +772,13 @@ export default function Pdv() {
             </div>
 
             <div className="p-5 bg-gray-50 border-t border-gray-200 flex gap-3 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)]">
-              <button onClick={() => setModalAberto(false)} className="px-6 py-4 font-bold text-gray-600 bg-white border border-gray-300 rounded-2xl hover:bg-gray-100 active:scale-95 transition-transform">Voltar</button>
+              <button disabled={Boolean(tentativaPendente) || processandoVenda} onClick={() => setModalAberto(false)} className="px-6 py-4 font-bold text-gray-600 bg-white border border-gray-300 rounded-2xl hover:bg-gray-100 active:scale-95 transition-transform disabled:cursor-not-allowed disabled:opacity-50">Voltar</button>
               <button 
                 disabled={processandoVenda || faltaPagar > 0 || isPagamentoInvalido} 
                 onClick={finalizarCompra} 
                 className={`flex-1 py-4 font-bold text-white rounded-2xl shadow-xl transition-all ${processandoVenda || faltaPagar > 0 || isPagamentoInvalido ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 active:scale-95'}`}
               >
-                {processandoVenda ? 'Registrando...' : 'Confirmar Pagamento'}
+                {processandoVenda ? 'Registrando...' : tentativaPendente ? 'Tentar novamente com segurança' : 'Confirmar Pagamento'}
               </button>
             </div>
           </div>

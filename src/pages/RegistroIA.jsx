@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Barcode, Camera, CheckCircle, PackagePlus, Loader2, DollarSign, Hash, Package, Boxes, Zap, Globe } from 'lucide-react'
+import { ArrowLeft, Barcode, Camera, CheckCircle, PackagePlus, Loader2, DollarSign, Hash, Boxes, Zap, Globe } from 'lucide-react'
 import LeitorCamera from '../components/LeitorCamera'
 import RegistroIALote from '../components/RegistroIALote'
+import { useAuth } from '../context/useAuth'
+import { callIdempotentRpc } from '../services/idempotentRpc'
 
 const parseNumber = (value) => {
   if (!value) return 0
@@ -41,7 +43,7 @@ const buscarProdutoNaInternet = async (codigo) => {
     if (data.status === 1 && data.product) {
       return { nome: data.product.product_name, marca: data.product.brands, fotoUrl: data.product.image_url }
     }
-  } catch (e) { console.warn("OpenBeauty falhou") }
+  } catch (error) { console.warn('OpenBeauty falhou:', error) }
 
   // Tenta UPCItemDB (Gratuito, limite alto, base gigante)
   try {
@@ -50,13 +52,14 @@ const buscarProdutoNaInternet = async (codigo) => {
     if (data.items && data.items.length > 0) {
       return { nome: data.items[0].title, marca: data.items[0].brand, fotoUrl: data.items[0].images[0] }
     }
-  } catch (e) { console.warn("UPCItemDB falhou") }
+  } catch (error) { console.warn('UPCItemDB falhou:', error) }
 
   return null
 }
 
 export default function RegistroRapido() {
   const navigate = useNavigate()
+  const { profile, user } = useAuth()
 
   const [modo, setModo] = useState(null) 
   const [setoresDoBanco, setSetoresDoBanco] = useState([])
@@ -81,11 +84,12 @@ export default function RegistroRapido() {
   })
 
   useEffect(() => {
+    if (!profile) return
     async function carregarEstrutura() {
       try {
         const [resSetores, resMarcas] = await Promise.all([
-          supabase.from('setores').select('*'),
-          supabase.from('marcas').select('*')
+          supabase.from('setores').select('*').eq('loja_id', profile.loja_id),
+          supabase.from('marcas').select('*').eq('loja_id', profile.loja_id)
         ])
         if (!resSetores.error) setSetoresDoBanco(resSetores.data || [])
         if (!resMarcas.error) setMarcasDoBanco(resMarcas.data || [])
@@ -94,7 +98,7 @@ export default function RegistroRapido() {
       }
     }
     carregarEstrutura()
-  }, [])
+  }, [profile])
 
   // === PASSO 1: LER O CÓDIGO E PROCESSAR INSTANTANEAMENTE ===
   const processarCodigo = async (codigo) => {
@@ -157,31 +161,21 @@ export default function RegistroRapido() {
     setStatus('Salvando no sistema...')
     
     try {
-      const { data: novoProduto, error: erroProd } = await supabase.from('produtos').insert([{
-        nome: dados.nome,
-        codigo_barras: dados.codigoBarras || null,
-        marca_id: dados.marcaId,
-        preco_venda: parseNumber(dados.precoVenda),
-        preco_custo: parseNumber(dados.precoCusto),
-        estoque: parseInt(dados.estoque, 10) || 0,
-        imagem_url: dados.fotoUrlExterna, // Se a internet achou a foto, salva o link dela direto!
-        tipo: 'solo'
-      }]).select().single()
-
-      if (erroProd) throw erroProd
-
-      const { error: erroLote } = await supabase.from('estoque_lotes').insert([{
-        produto_id: novoProduto.id,
-        quantidade_inicial: parseInt(dados.estoque, 10) || 0,
-        quantidade_atual: parseInt(dados.estoque, 10) || 0,
-        preco_custo: parseNumber(dados.precoCusto),
-        status: 'ativo'
-      }])
-
-      if (erroLote) {
-        await supabase.from('produtos').delete().match({ id: novoProduto.id });
-        throw erroLote
-      }
+      await callIdempotentRpc({
+        userId: user.id,
+        operation: `registro_rapido_${dados.codigoBarras || normalize(dados.nome)}`,
+        functionName: 'registrar_entrada_estoque',
+        payload: {
+          name: dados.nome,
+          codigo_barras: dados.codigoBarras || null,
+          marca_id: dados.marcaId,
+          unit_price: parseNumber(dados.precoVenda),
+          unit_cost: parseNumber(dados.precoCusto),
+          quantity: parseInt(dados.estoque, 10) || 0,
+          imagem_url: dados.fotoUrlExterna,
+          tipo: 'solo',
+        },
+      })
 
       setSucesso(true)
     } catch (error) {

@@ -3,21 +3,25 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../services/supabase'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ArrowLeft, Layers, Tags, Plus, Trash2, Info, ChevronRight, ChevronDown, Package, Edit2, Check, X } from 'lucide-react'
+import { useAuth } from '../context/useAuth'
 
-async function buscarSetores() {
-  const { data, error } = await supabase.from('setores').select('*').order('nome')
+async function buscarSetores(lojaId) {
+  const { data, error } = await supabase.from('setores')
+    .select('*').eq('loja_id', lojaId).order('nome')
   if (error) throw error
   return data || []
 }
 
-async function buscarMarcas(setorId) {
-  const { data, error } = await supabase.from('marcas').select('*').eq('setor_id', setorId).order('nome')
+async function buscarMarcas(lojaId, setorId) {
+  const { data, error } = await supabase.from('marcas')
+    .select('*').eq('loja_id', lojaId).eq('setor_id', setorId).order('nome')
   if (error) throw error
   return data || []
 }
 
 export default function OrganizacaoCatalogo() {
   const navigate = useNavigate()
+  const { profile } = useAuth()
 
   const [setores, setSetores] = useState([])
   const [setorSelecionado, setSetorSelecionado] = useState(null)
@@ -42,8 +46,9 @@ export default function OrganizacaoCatalogo() {
   // 1. BUSCAR DADOS
   // ==========================================
   useEffect(() => {
+    if (!profile) return undefined
     let active = true
-    buscarSetores()
+    buscarSetores(profile.loja_id)
       .then((data) => {
         if (!active) return
         setSetores(data)
@@ -58,12 +63,12 @@ export default function OrganizacaoCatalogo() {
         if (active) setCarregando(false)
       })
     return () => { active = false }
-  }, [])
+  }, [profile])
 
   useEffect(() => {
-    if (!setorSelecionado) return undefined
+    if (!setorSelecionado || !profile) return undefined
     let active = true
-    buscarMarcas(setorSelecionado.id)
+    buscarMarcas(profile.loja_id, setorSelecionado.id)
       .then((data) => {
         if (active) setMarcas(data)
       })
@@ -71,16 +76,17 @@ export default function OrganizacaoCatalogo() {
         console.error('Erro ao carregar marcas:', error)
       })
     return () => { active = false }
-  }, [setorSelecionado])
+  }, [profile, setorSelecionado])
 
   // ==========================================
   // 2. CRUD SETORES
   // ==========================================
   const adicionarSetor = async (e) => {
     e.preventDefault()
-    if (!novoSetor.trim()) return
+    if (!novoSetor.trim() || !profile) return
     try {
-      const { data, error } = await supabase.from('setores').insert([{ nome: novoSetor.trim() }]).select().single()
+      const { data, error } = await supabase.from('setores')
+        .insert([{ nome: novoSetor.trim(), loja_id: profile.loja_id }]).select().single()
       if (error) throw error
       setNovoSetor('')
       setSetores([...setores, data].sort((a, b) => a.nome.localeCompare(b.nome)))
@@ -94,7 +100,8 @@ export default function OrganizacaoCatalogo() {
   const salvarEdicaoSetor = async (id) => {
     if (!textoEdicaoSetor.trim()) return cancelarEdicaoSetor()
     try {
-      const { error } = await supabase.from('setores').update({ nome: textoEdicaoSetor.trim() }).eq('id', id)
+      const { error } = await supabase.from('setores').update({ nome: textoEdicaoSetor.trim() })
+        .eq('id', id).eq('loja_id', profile.loja_id)
       if (error) throw error
       
       setSetores(setores.map(s => s.id === id ? { ...s, nome: textoEdicaoSetor.trim() } : s))
@@ -110,7 +117,8 @@ export default function OrganizacaoCatalogo() {
   const excluirSetor = async (id, nome) => {
     if (!confirm(`ATENÇÃO! Excluir o setor "${nome}" apagará TODAS as marcas e produtos atrelados a ele. Confirma?`)) return
     try {
-      const { error } = await supabase.from('setores').delete().eq('id', id)
+      const { error } = await supabase.from('setores').delete()
+        .eq('id', id).eq('loja_id', profile.loja_id)
       if (error) throw error
       if (setorSelecionado?.id === id) {
         setSetorSelecionado(null)
@@ -139,9 +147,14 @@ export default function OrganizacaoCatalogo() {
   // ==========================================
   const adicionarMarca = async (e) => {
     e.preventDefault()
-    if (!novaMarca.trim() || !setorSelecionado) return
+    if (!novaMarca.trim() || !setorSelecionado || !profile) return
     try {
-      const { data, error } = await supabase.from('marcas').insert([{ nome: novaMarca.trim(), setor_id: setorSelecionado.id }]).select().single()
+      const { data, error } = await supabase.from('marcas')
+        .insert([{
+          nome: novaMarca.trim(),
+          setor_id: setorSelecionado.id,
+          loja_id: profile.loja_id,
+        }]).select().single()
       if (error) throw error
       setNovaMarca('')
       setMarcas([...marcas, data].sort((a, b) => a.nome.localeCompare(b.nome)))
@@ -153,7 +166,8 @@ export default function OrganizacaoCatalogo() {
   const salvarEdicaoMarca = async (id) => {
     if (!textoEdicaoMarca.trim()) return cancelarEdicaoMarca()
     try {
-      const { error } = await supabase.from('marcas').update({ nome: textoEdicaoMarca.trim() }).eq('id', id)
+      const { error } = await supabase.from('marcas').update({ nome: textoEdicaoMarca.trim() })
+        .eq('id', id).eq('loja_id', profile.loja_id)
       if (error) throw error
       setMarcas(marcas.map(m => m.id === id ? { ...m, nome: textoEdicaoMarca.trim() } : m))
       setEditandoMarcaId(null)
@@ -165,7 +179,8 @@ export default function OrganizacaoCatalogo() {
   const excluirMarca = async (id, nome) => {
     if (!confirm(`Excluir a marca "${nome}" apagará TODOS os produtos atrelados a ela. Confirma?`)) return
     try {
-      const { error } = await supabase.from('marcas').delete().eq('id', id)
+      const { error } = await supabase.from('marcas').delete()
+        .eq('id', id).eq('loja_id', profile.loja_id)
       if (error) throw error
       setMarcas(marcas.filter(m => m.id !== id))
       setEditandoMarcaId(null)

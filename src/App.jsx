@@ -4,8 +4,10 @@ import OneSignal from 'react-onesignal'
 
 import { AuthProvider } from './context/AuthProvider'
 import { useAuth } from './context/useAuth'
+import { supabase } from './services/supabase'
 import Layout from './components/Layout'
 import RequireAuth from './components/RequireAuth'
+import RequireRole from './components/RequireRole'
 import AuthCallback from './pages/AuthCallback'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -24,11 +26,19 @@ import Fiado from './pages/Fiado'
 import InstalacaoBanner from './components/InstalacaoBanner'
 
 function AppRoutes() {
-  const { profile } = useAuth()
-  const oneSignalStarted = useRef(false)
+  const { user, profile, isLoading } = useAuth()
+  const oneSignalInit = useRef(null)
 
   useEffect(() => {
-    if (!profile || oneSignalStarted.current) return
+    if (isLoading) return
+    if (!user || !profile?.ativo) {
+      if (!user && oneSignalInit.current) {
+        void Promise.resolve(oneSignalInit.current)
+          .then(() => OneSignal.logout())
+          .catch((error) => console.error('Erro ao sair do OneSignal:', error))
+      }
+      return
+    }
 
     const appId = import.meta.env.VITE_ONESIGNAL_APP_ID
     if (!appId) {
@@ -36,22 +46,41 @@ function AppRoutes() {
       return
     }
 
-    oneSignalStarted.current = true
+    let active = true
     const iniciarOneSignal = async () => {
       try {
-        await OneSignal.init({
-          appId: String(appId).trim(),
-          allowLocalhostAsSecureOrigin: true,
-          notifyButton: { enable: true },
-        })
+        if (!oneSignalInit.current) {
+          oneSignalInit.current = OneSignal.init({
+            appId: String(appId).trim(),
+            allowLocalhostAsSecureOrigin: true,
+            notifyButton: { enable: true },
+          })
+        }
+        await oneSignalInit.current
+        await OneSignal.login(user.id)
         await OneSignal.Slidedown.promptPush()
+
+        const subscriptionId = OneSignal.User.PushSubscription.id
+        if (!active || !subscriptionId) return
+
+        const { error } = await supabase.from('onesignal_dispositivos').upsert({
+          loja_id: profile.loja_id,
+          usuario_id: user.id,
+          external_id: user.id,
+          subscription_id: subscriptionId,
+          ativo: true,
+        }, { onConflict: 'subscription_id' })
+        if (error) throw error
       } catch (error) {
+        oneSignalInit.current = null
         console.error('Erro ao iniciar OneSignal:', error)
       }
     }
 
     iniciarOneSignal()
-  }, [profile])
+
+    return () => { active = false }
+  }, [isLoading, profile, user])
 
   return (
     <>
@@ -64,14 +93,16 @@ function AppRoutes() {
 
         <Route element={<RequireAuth />}>
           <Route element={<Layout />}>
-            <Route path="/admin-home" element={<AdminHome />} />
-            <Route path="/cadastro-produto" element={<CadastroProduto />} />
-            <Route path="/registro-ia" element={<RegistroIA />} />
-            <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
-            <Route path="/estoque" element={<Estoque />} />
-            <Route path="/financeiro" element={<Financeiro />} />
-            <Route path="/teste-impressora" element={<TesteImpressora />} />
-            <Route path="/equipe" element={<Equipe />} />
+            <Route element={<RequireRole role="dono" />}>
+              <Route path="/admin-home" element={<AdminHome />} />
+              <Route path="/cadastro-produto" element={<CadastroProduto />} />
+              <Route path="/registro-ia" element={<RegistroIA />} />
+              <Route path="/organizacao-catalogo" element={<OrganizacaoCatalogo />} />
+              <Route path="/estoque" element={<Estoque />} />
+              <Route path="/financeiro" element={<Financeiro />} />
+              <Route path="/teste-impressora" element={<TesteImpressora />} />
+              <Route path="/equipe" element={<Equipe />} />
+            </Route>
             <Route path="/caixa" element={<CaixaHome />} />
           </Route>
           <Route path="/pdv" element={<Pdv />} />
