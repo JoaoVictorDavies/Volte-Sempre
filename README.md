@@ -20,7 +20,8 @@ O login da aplicação usa exclusivamente o provedor Google do Supabase. O `Auth
 
 ## Banco de dados
 
-- Para um projeto Supabase vazio, execute `supabase/schema.sql` uma única vez no SQL Editor.
+- Execute `supabase/schema.sql` no SQL Editor do Supabase. O script pode ser reaplicado: tabelas e índices existentes não são recriados, e as políticas gerenciadas pelo script são substituídas sem apagar dados.
+- `CREATE TABLE IF NOT EXISTS` não corrige tabelas preexistentes com colunas ou restrições diferentes. Se o esquema existente divergir, aplique uma migração compatível antes de reaplicar o script.
 - Para o banco que já recebeu a versão inicial do esquema, execute `supabase/migrations/20261101010000_add_financial_action_audit.sql` antes de publicar esta versão do frontend. Ela acrescenta os campos de operador às sessões de caixa, itens de venda e operações de fiado sem apagar o histórico existente.
 
 As gravações financeiras do frontend usam o UUID da sessão Auth como `usuario_id`. O fechamento de caixa também grava `fechado_por`, preservando a identidade de quem encerrou a sessão.

@@ -1,11 +1,11 @@
 -- Volte!Sempre - esquema inicial para um projeto Supabase vazio.
--- Execute uma vez no SQL Editor do Supabase. Configure Google como provedor
+-- Pode ser executado novamente sem apagar dados. Configure Google como provedor
 -- exclusivo em Authentication > Providers; o SQL tambem valida o provedor
 -- nas funcoes de criacao de loja e aceite de convite.
 
 begin;
 
-create table public.lojas (
+create table if not exists public.lojas (
   id uuid primary key default gen_random_uuid(),
   nome text not null check (length(btrim(nome)) > 0),
   ativa boolean not null default true,
@@ -13,7 +13,7 @@ create table public.lojas (
   atualizado_em timestamptz not null default now()
 );
 
-create table public.usuarios (
+create table if not exists public.usuarios (
   id uuid primary key references auth.users(id) on delete cascade,
   loja_id uuid not null references public.lojas(id) on delete cascade,
   nome text not null,
@@ -26,7 +26,7 @@ create table public.usuarios (
   unique (id, loja_id)
 );
 
-create table public.convites_loja (
+create table if not exists public.convites_loja (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   token uuid not null unique default gen_random_uuid(),
@@ -43,7 +43,7 @@ create table public.convites_loja (
   unique (id, loja_id)
 );
 
-create table public.setores (
+create table if not exists public.setores (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   nome text not null check (length(btrim(nome)) > 0),
@@ -52,7 +52,7 @@ create table public.setores (
   unique (loja_id, nome)
 );
 
-create table public.marcas (
+create table if not exists public.marcas (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   setor_id uuid,
@@ -64,7 +64,7 @@ create table public.marcas (
     references public.setores(id, loja_id) on delete restrict
 );
 
-create table public.produtos (
+create table if not exists public.produtos (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   marca_id uuid,
@@ -83,11 +83,11 @@ create table public.produtos (
     references public.marcas(id, loja_id) on delete restrict
 );
 
-create unique index produtos_codigo_barras_por_loja
+create unique index if not exists produtos_codigo_barras_por_loja
   on public.produtos (loja_id, codigo_barras)
   where codigo_barras is not null;
 
-create table public.estoque_lotes (
+create table if not exists public.estoque_lotes (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   produto_id uuid not null,
@@ -104,7 +104,7 @@ create table public.estoque_lotes (
     references public.produtos(id, loja_id) on delete restrict
 );
 
-create table public.clientes (
+create table if not exists public.clientes (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   nome text not null check (length(btrim(nome)) > 0),
@@ -118,11 +118,11 @@ create table public.clientes (
   unique (id, loja_id)
 );
 
-create unique index clientes_cpf_por_loja
+create unique index if not exists clientes_cpf_por_loja
   on public.clientes (loja_id, cpf)
   where cpf is not null and btrim(cpf) <> '';
 
-create table public.caixa_sessoes (
+create table if not exists public.caixa_sessoes (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   usuario_id uuid not null,
@@ -146,7 +146,7 @@ create table public.caixa_sessoes (
   )
 );
 
-create table public.vendas (
+create table if not exists public.vendas (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   cliente_id uuid,
@@ -168,7 +168,7 @@ create table public.vendas (
     references public.usuarios(id, loja_id) on delete restrict
 );
 
-create table public.vendas_itens (
+create table if not exists public.vendas_itens (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   usuario_id uuid not null,
@@ -187,7 +187,7 @@ create table public.vendas_itens (
     references public.produtos(id, loja_id) on delete restrict
 );
 
-create table public.fiado_contas (
+create table if not exists public.fiado_contas (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   usuario_id uuid not null,
@@ -211,7 +211,7 @@ create table public.fiado_contas (
     references public.vendas(id, loja_id) on delete restrict
 );
 
-create table public.fiado_pagamentos (
+create table if not exists public.fiado_pagamentos (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   usuario_id uuid not null,
@@ -229,7 +229,7 @@ create table public.fiado_pagamentos (
     references public.fiado_contas(id, loja_id, cliente_id) on delete restrict
 );
 
-create table public.fichas_contas (
+create table if not exists public.fichas_contas (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   cliente_id uuid not null,
@@ -250,7 +250,7 @@ create table public.fichas_contas (
     references public.vendas(id, loja_id) on delete restrict
 );
 
-create table public.fichas_pagamentos (
+create table if not exists public.fichas_pagamentos (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   cliente_id uuid not null,
@@ -265,7 +265,7 @@ create table public.fichas_pagamentos (
     references public.fichas_contas(id, loja_id, cliente_id) on delete restrict
 );
 
-create table public.onesignal_dispositivos (
+create table if not exists public.onesignal_dispositivos (
   id uuid primary key default gen_random_uuid(),
   loja_id uuid not null references public.lojas(id) on delete cascade,
   usuario_id uuid not null,
@@ -282,29 +282,29 @@ create table public.onesignal_dispositivos (
   check (length(btrim(subscription_id)) > 0)
 );
 
-create index usuarios_loja_role_idx on public.usuarios (loja_id, role, ativo);
-create index convites_loja_pendentes_idx
+create index if not exists usuarios_loja_role_idx on public.usuarios (loja_id, role, ativo);
+create index if not exists convites_loja_pendentes_idx
   on public.convites_loja (loja_id, expira_em)
   where aceito_em is null and revogado_em is null;
-create index marcas_setor_idx on public.marcas (loja_id, setor_id);
-create index produtos_marca_idx on public.produtos (loja_id, marca_id);
-create index estoque_lotes_produto_idx
+create index if not exists marcas_setor_idx on public.marcas (loja_id, setor_id);
+create index if not exists produtos_marca_idx on public.produtos (loja_id, marca_id);
+create index if not exists estoque_lotes_produto_idx
   on public.estoque_lotes (loja_id, produto_id, status);
-create index clientes_nome_idx on public.clientes (loja_id, nome);
-create index caixa_sessoes_status_idx
+create index if not exists clientes_nome_idx on public.clientes (loja_id, nome);
+create index if not exists caixa_sessoes_status_idx
   on public.caixa_sessoes (loja_id, status, aberto_em desc);
-create index vendas_criado_em_idx on public.vendas (loja_id, criado_em desc);
-create index vendas_cliente_idx on public.vendas (loja_id, cliente_id);
-create index vendas_itens_venda_idx on public.vendas_itens (loja_id, venda_id);
-create index fiado_contas_cliente_status_idx
+create index if not exists vendas_criado_em_idx on public.vendas (loja_id, criado_em desc);
+create index if not exists vendas_cliente_idx on public.vendas (loja_id, cliente_id);
+create index if not exists vendas_itens_venda_idx on public.vendas_itens (loja_id, venda_id);
+create index if not exists fiado_contas_cliente_status_idx
   on public.fiado_contas (loja_id, cliente_id, status);
-create index fiado_pagamentos_conta_idx
+create index if not exists fiado_pagamentos_conta_idx
   on public.fiado_pagamentos (loja_id, fiado_conta_id);
-create index fichas_contas_cliente_status_idx
+create index if not exists fichas_contas_cliente_status_idx
   on public.fichas_contas (loja_id, cliente_id, status);
-create index fichas_pagamentos_conta_idx
+create index if not exists fichas_pagamentos_conta_idx
   on public.fichas_pagamentos (loja_id, fichas_conta_id);
-create index onesignal_dispositivos_loja_ativo_idx
+create index if not exists onesignal_dispositivos_loja_ativo_idx
   on public.onesignal_dispositivos (loja_id, ativo);
 
 create or replace function public.minha_loja_id()
@@ -531,22 +531,29 @@ alter table public.fichas_contas enable row level security;
 alter table public.fichas_pagamentos enable row level security;
 alter table public.onesignal_dispositivos enable row level security;
 
+drop policy if exists lojas_select_tenant on public.lojas;
 create policy lojas_select_tenant on public.lojas
   for select to authenticated using (id = (select public.minha_loja_id()));
+drop policy if exists lojas_insert_blocked on public.lojas;
 create policy lojas_insert_blocked on public.lojas
   for insert to authenticated with check (false);
+drop policy if exists lojas_update_tenant on public.lojas;
 create policy lojas_update_tenant on public.lojas
   for update to authenticated
   using (id = (select public.minha_loja_id()) and (select public.sou_dono_da_loja()))
   with check (id = (select public.minha_loja_id()) and (select public.sou_dono_da_loja()));
+drop policy if exists lojas_delete_blocked on public.lojas;
 create policy lojas_delete_blocked on public.lojas
   for delete to authenticated using (false);
 
+drop policy if exists usuarios_select_tenant on public.usuarios;
 create policy usuarios_select_tenant on public.usuarios
   for select to authenticated
   using (loja_id = (select public.minha_loja_id()));
+drop policy if exists usuarios_insert_blocked on public.usuarios;
 create policy usuarios_insert_blocked on public.usuarios
   for insert to authenticated with check (false);
+drop policy if exists usuarios_update_owner on public.usuarios;
 create policy usuarios_update_owner on public.usuarios
   for update to authenticated
   using (
@@ -558,6 +565,7 @@ create policy usuarios_update_owner on public.usuarios
     and (id <> (select auth.uid()) or ativo)
     and (select public.sou_dono_da_loja())
   );
+drop policy if exists usuarios_delete_employee_owner on public.usuarios;
 create policy usuarios_delete_employee_owner on public.usuarios
   for delete to authenticated
   using (
@@ -566,12 +574,14 @@ create policy usuarios_delete_employee_owner on public.usuarios
     and (select public.sou_dono_da_loja())
   );
 
+drop policy if exists convites_loja_select_owner on public.convites_loja;
 create policy convites_loja_select_owner on public.convites_loja
   for select to authenticated
   using (
     loja_id = (select public.minha_loja_id())
     and (select public.sou_dono_da_loja())
   );
+drop policy if exists convites_loja_insert_owner on public.convites_loja;
 create policy convites_loja_insert_owner on public.convites_loja
   for insert to authenticated
   with check (
@@ -580,6 +590,7 @@ create policy convites_loja_insert_owner on public.convites_loja
     and role = 'funcionario'
     and (select public.sou_dono_da_loja())
   );
+drop policy if exists convites_loja_update_owner on public.convites_loja;
 create policy convites_loja_update_owner on public.convites_loja
   for update to authenticated
   using (
@@ -590,6 +601,7 @@ create policy convites_loja_update_owner on public.convites_loja
     loja_id = (select public.minha_loja_id())
     and (select public.sou_dono_da_loja())
   );
+drop policy if exists convites_loja_delete_owner on public.convites_loja;
 create policy convites_loja_delete_owner on public.convites_loja
   for delete to authenticated
   using (
@@ -597,55 +609,69 @@ create policy convites_loja_delete_owner on public.convites_loja
     and (select public.sou_dono_da_loja())
   );
 
+drop policy if exists setores_tenant_all on public.setores;
 create policy setores_tenant_all on public.setores
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists marcas_tenant_all on public.marcas;
 create policy marcas_tenant_all on public.marcas
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists produtos_tenant_all on public.produtos;
 create policy produtos_tenant_all on public.produtos
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists estoque_lotes_tenant_all on public.estoque_lotes;
 create policy estoque_lotes_tenant_all on public.estoque_lotes
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists clientes_tenant_all on public.clientes;
 create policy clientes_tenant_all on public.clientes
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists caixa_sessoes_tenant_all on public.caixa_sessoes;
 create policy caixa_sessoes_tenant_all on public.caixa_sessoes
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists vendas_tenant_all on public.vendas;
 create policy vendas_tenant_all on public.vendas
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists vendas_itens_tenant_all on public.vendas_itens;
 create policy vendas_itens_tenant_all on public.vendas_itens
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists fiado_contas_tenant_all on public.fiado_contas;
 create policy fiado_contas_tenant_all on public.fiado_contas
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists fiado_pagamentos_tenant_all on public.fiado_pagamentos;
 create policy fiado_pagamentos_tenant_all on public.fiado_pagamentos
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists fichas_contas_tenant_all on public.fichas_contas;
 create policy fichas_contas_tenant_all on public.fichas_contas
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
+drop policy if exists fichas_pagamentos_tenant_all on public.fichas_pagamentos;
 create policy fichas_pagamentos_tenant_all on public.fichas_pagamentos
   for all to authenticated
   using (loja_id = (select public.minha_loja_id()))
   with check (loja_id = (select public.minha_loja_id()));
 
+drop policy if exists onesignal_dispositivos_select_owner_or_self
+  on public.onesignal_dispositivos;
 create policy onesignal_dispositivos_select_owner_or_self
   on public.onesignal_dispositivos
   for select to authenticated
@@ -656,6 +682,8 @@ create policy onesignal_dispositivos_select_owner_or_self
       or (select public.sou_dono_da_loja())
     )
   );
+drop policy if exists onesignal_dispositivos_insert_self
+  on public.onesignal_dispositivos;
 create policy onesignal_dispositivos_insert_self
   on public.onesignal_dispositivos
   for insert to authenticated
@@ -664,6 +692,8 @@ create policy onesignal_dispositivos_insert_self
     and usuario_id = (select auth.uid())
     and external_id = (select auth.uid())::text
   );
+drop policy if exists onesignal_dispositivos_update_owner_or_self
+  on public.onesignal_dispositivos;
 create policy onesignal_dispositivos_update_owner_or_self
   on public.onesignal_dispositivos
   for update to authenticated
@@ -682,6 +712,8 @@ create policy onesignal_dispositivos_update_owner_or_self
       or (select public.sou_dono_da_loja())
     )
   );
+drop policy if exists onesignal_dispositivos_delete_owner_or_self
+  on public.onesignal_dispositivos;
 create policy onesignal_dispositivos_delete_owner_or_self
   on public.onesignal_dispositivos
   for delete to authenticated
